@@ -58,6 +58,28 @@ class ChartGenerator:
         self.chart_dir.mkdir(parents=True, exist_ok=True)
         sns.set_theme(style="whitegrid")
 
+    def _format_date_axis(self, ax, date_format='%d-%b', rotation=45, max_ticks=8):
+        """
+        Formato consistente de fechas en eje X.
+
+        Args:
+            ax: Matplotlib axis
+            date_format: Formato de fecha (ej: '%d-%b' -> '15-Nov')
+            rotation: Angulo de rotacion de labels
+            max_ticks: Maximo numero de ticks a mostrar
+        """
+        from matplotlib.dates import DateFormatter, AutoDateLocator
+        from matplotlib.ticker import MaxNLocator
+
+        formatter = DateFormatter(date_format)
+        locator = AutoDateLocator(maxticks=max_ticks)
+        ax.xaxis.set_major_formatter(formatter)
+        ax.xaxis.set_major_locator(locator)
+        plt.setp(ax.xaxis.get_majorticklabels(),
+                 rotation=rotation,
+                 ha='right',
+                 fontsize=9)
+
     def generate(
         self,
         bundle: DataBundle,
@@ -338,9 +360,17 @@ class ChartGenerator:
         ax3.legend(loc="best", fontsize=9)
         ax3.grid(True, alpha=0.3)
 
+        # Aplicar formato de fechas al eje X compartido (solo en el ultimo subplot)
+        self._format_date_axis(ax3, date_format='%d-%b', rotation=45, max_ticks=8)
+
+        # Caption con fuente
+        fig.text(0.5, 0.01,
+                 'Fuente: Elaboracion propia con datos de Mindicador.cl y Alpha Vantage',
+                 ha='center', fontsize=9, style='italic', color='gray')
+
         # Save chart
         chart_path = self.chart_dir / f"chart_technical_panel_{horizon}.png"
-        fig.tight_layout()
+        fig.tight_layout(rect=[0, 0.02, 1, 1])  # Ajustar para caption
         fig.savefig(chart_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
 
@@ -413,9 +443,14 @@ class ChartGenerator:
         ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
         ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
 
+        # Caption con fuente
+        fig.text(0.5, 0.01,
+                 'Fuente: Elaboracion propia con datos de Yahoo Finance (retornos diarios)',
+                 ha='center', fontsize=9, style='italic', color='gray')
+
         # Save chart
         chart_path = self.chart_dir / f"chart_correlation_{horizon}.png"
-        fig.tight_layout()
+        fig.tight_layout(rect=[0, 0.02, 1, 1])  # Ajustar para caption
         fig.savefig(chart_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
 
@@ -458,6 +493,7 @@ class ChartGenerator:
         ax1.tick_params(axis="y", labelcolor="#1f77b4")
         ax1_twin.tick_params(axis="y", labelcolor="#d62728")
         ax1.grid(True, alpha=0.3)
+        self._format_date_axis(ax1, date_format='%d-%b', rotation=45, max_ticks=6)
 
         # Subplot 2: Interest Rate Differential
         ax2 = axes[0, 1]
@@ -477,6 +513,7 @@ class ChartGenerator:
             ax2.set_title("Tasa de Política Monetaria (TPM)", fontsize=12, fontweight="bold")
 
         ax2.grid(True, alpha=0.3)
+        self._format_date_axis(ax2, date_format='%d-%b', rotation=45, max_ticks=6)
 
         # Subplot 3: DXY Index
         ax3 = axes[1, 0]
@@ -491,6 +528,8 @@ class ChartGenerator:
             ax3.set_title("Índice Dólar (DXY)", fontsize=12, fontweight="bold")
 
         ax3.grid(True, alpha=0.3)
+        ax3.set_xlabel("Fecha", fontsize=10)
+        self._format_date_axis(ax3, date_format='%d-%b', rotation=45, max_ticks=6)
 
         # Subplot 4: Inflation
         ax4 = axes[1, 1]
@@ -498,15 +537,22 @@ class ChartGenerator:
         ax4.bar(ipc_recent.index, ipc_recent.values, color="#9467bd", alpha=0.7, width=20)
         ax4.axhline(y=0, color="black", linestyle="-", linewidth=1)
         ax4.set_ylabel("IPC Mensual (%)", fontsize=10)
+        ax4.set_xlabel("Fecha", fontsize=10)
         ax4.set_title("Inflación Chile (IPC)", fontsize=12, fontweight="bold")
         ax4.grid(True, alpha=0.3, axis="y")
+        self._format_date_axis(ax4, date_format='%d-%b', rotation=45, max_ticks=6)
 
         # Overall title
         fig.suptitle("Dashboard de Drivers Macroeconómicos", fontsize=16, fontweight="bold", y=0.995)
 
+        # Caption con fuente
+        fig.text(0.5, 0.01,
+                 'Fuente: Elaboracion propia con datos de Mindicador.cl (BCCh), Yahoo Finance',
+                 ha='center', fontsize=9, style='italic', color='gray')
+
         # Save chart
         chart_path = self.chart_dir / f"chart_macro_dashboard_{horizon}.png"
-        fig.tight_layout()
+        fig.tight_layout(rect=[0, 0.02, 1, 0.99])  # Ajustar para caption y titulo
         fig.savefig(chart_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
 
@@ -566,6 +612,7 @@ class ChartGenerator:
         ax1.set_title(f"DXY: {gauge.dxy_change:+.2f}%", fontsize=12, fontweight="bold")
         ax1.set_ylabel("DXY Index", fontsize=10)
         ax1.grid(True, alpha=0.3)
+        self._format_date_axis(ax1, date_format='%d-%b', rotation=45, max_ticks=5)
 
         # Color background based on change
         if gauge.dxy_change < 0:
@@ -579,6 +626,7 @@ class ChartGenerator:
         ax2.set_title(f"VIX: {gauge.vix_change:+.2f}%", fontsize=12, fontweight="bold")
         ax2.set_ylabel("VIX Index", fontsize=10)
         ax2.grid(True, alpha=0.3)
+        self._format_date_axis(ax2, date_format='%d-%b', rotation=45, max_ticks=5)
 
         if gauge.vix_change < 0:
             ax2.set_facecolor("#e8f5e9")
@@ -590,7 +638,9 @@ class ChartGenerator:
         ax3.plot(eem_recent.index, eem_recent.values, color="#2ca02c", linewidth=2)
         ax3.set_title(f"EEM: {gauge.eem_change:+.2f}%", fontsize=12, fontweight="bold")
         ax3.set_ylabel("EEM ETF", fontsize=10)
+        ax3.set_xlabel("Fecha", fontsize=10)
         ax3.grid(True, alpha=0.3)
+        self._format_date_axis(ax3, date_format='%d-%b', rotation=45, max_ticks=5)
 
         if gauge.eem_change > 0:
             ax3.set_facecolor("#e8f5e9")
@@ -643,9 +693,14 @@ class ChartGenerator:
         # Overall title
         fig.suptitle("Régimen de Riesgo de Mercado (5 días)", fontsize=16, fontweight="bold")
 
+        # Caption con fuente
+        fig.text(0.5, 0.01,
+                 'Fuente: Elaboracion propia con datos de Yahoo Finance (DXY, VIX, EEM)',
+                 ha='center', fontsize=9, style='italic', color='gray')
+
         # Save chart
         chart_path = self.chart_dir / f"chart_risk_regime_{horizon}.png"
-        fig.tight_layout()
+        fig.tight_layout(rect=[0, 0.02, 1, 0.98])  # Ajustar para caption y titulo
         fig.savefig(chart_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
 

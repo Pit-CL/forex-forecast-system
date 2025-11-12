@@ -158,13 +158,25 @@ class ReportBuilder:
         sections.append("## Proyección Cuantitativa")
         sections.append(self._build_forecast_table(forecast))
 
+        # Chart explanation: Technical Panel
+        sections.append(self._build_technical_panel_explanation(bundle))
+
         # Technical Analysis
         sections.append("## Análisis Técnico")
         sections.append(self._build_technical_analysis(bundle))
 
+        # Chart explanation: Correlation Matrix
+        sections.append(self._build_correlation_explanation())
+
+        # Chart explanation: Macro Dashboard
+        sections.append(self._build_macro_dashboard_explanation(bundle))
+
         # Risk Regime Assessment
         sections.append("## Régimen de Riesgo de Mercado")
         sections.append(self._build_risk_regime(bundle))
+
+        # Chart explanation: Risk Regime
+        sections.append(self._build_regime_explanation(bundle))
 
         # Fundamental Factors
         sections.append("## Factores Fundamentales")
@@ -292,23 +304,60 @@ class ReportBuilder:
         return "\n".join(drivers)
 
     def _build_methodology(self, artifacts: Dict) -> str:
-        """Build methodology section."""
+        """Build methodology section with model justification."""
+
+        # Justificacion del ensemble
+        justification = """
+### Justificacion de la Seleccion del Modelo
+
+Se opto por un **modelo ensemble** que combina tres metodologias complementarias:
+
+#### 1. ARIMA-GARCH (Peso: ~50%)
+**Por que**: Captura patrones autorregresivos y volatilidad condicional heterocedástica,
+ideal para series financieras con clusters de volatilidad como USD/CLP.
+
+- **Fortalezas**: Modela bien la inercia del tipo de cambio y cambios de volatilidad
+- **Uso**: Proyeccion de corto plazo (1-7 dias) con intervalos de confianza dinamicos
+
+#### 2. VAR - Vector Autoregression (Peso: ~46%)
+**Por que**: Modela relaciones multivariadas entre USD/CLP, cobre, DXY y TPM,
+capturando interdependencias macroeconomicas.
+
+- **Fortalezas**: Captura transmision de shocks entre variables (ej: caida del cobre → depreciacion CLP)
+- **Uso**: Incorpora informacion fundamental para forecasts estructurales
+
+#### 3. Random Forest (Peso: ~5%)
+**Por que**: Modelo no lineal que captura relaciones complejas que ARIMA/VAR no ven.
+
+- **Fortalezas**: Maneja no linealidades, umbrales, interacciones de alto orden
+- **Limitacion**: Menor peso por ser "caja negra" con menor interpretabilidad
+- **Uso**: Diversificador que reduce overfitting del ensemble
+
+### Determinacion de Pesos
+
+Los pesos se calculan dinamicamente mediante:
+- **Inverse RMSE**: Modelos con menor error historico reciben mayor peso
+- **Rolling Window**: Ventana de validacion de 90 dias para capturar regimen reciente
+- **Recalibracion**: Pesos se actualizan en cada ejecucion segun performance reciente
+
+### Intervalos de Confianza
+
+Se generan mediante **simulacion Monte Carlo**:
+1. Extraccion de residuales historicos del ensemble
+2. 1,000 trayectorias simuladas con bootstrap de residuales
+3. Percentiles 10/90 (IC 80%) y 2.5/97.5 (IC 95%)
+
+Este enfoque captura mejor la incertidumbre que intervalos parametricos.
+"""
+
         weights = artifacts.get("weights", {})
         if weights:
             weights_str = ", ".join(f"{k}: {v:.2f}" for k, v in weights.items())
-            text = (
-                f"Tipo de razonamiento: **Pragmático** (ensemble de modelos complementarios). "
-                f"Se combinan ARIMA + VAR + RandomForest con pesos: {weights_str}. "
-                f"Intervalos de confianza mediante simulación Monte Carlo de residuales."
-            )
+            current_weights = f"\n**Pesos actuales del ensemble**: {weights_str}\n"
         else:
-            text = (
-                "Modelos estadísticos combinados (ARIMA, VAR, RandomForest) con "
-                "ponderación por desempeño histórico. Intervalos de confianza calculados "
-                "mediante simulación Monte Carlo."
-            )
+            current_weights = ""
 
-        return text
+        return justification + current_weights
 
     def _build_conclusion(
         self,
@@ -677,3 +726,116 @@ class ReportBuilder:
         )
 
         return disclaimer
+
+    def _build_technical_panel_explanation(self, bundle: DataBundle) -> str:
+        """Build explanation for technical panel chart."""
+        from ..analysis.technical import compute_technicals
+
+        try:
+            technicals = compute_technicals(bundle.usdclp_series)
+            rsi = technicals["rsi_14"]
+            macd = technicals["macd"]
+            macd_signal = technicals["macd_signal"]
+
+            # RSI interpretation
+            if rsi > 70:
+                rsi_interp = "RSI en sobrecompra (>70), sugiere posible corrección a la baja"
+            elif rsi < 30:
+                rsi_interp = "RSI en sobreventa (<30), sugiere posible rebote alcista"
+            else:
+                rsi_interp = f"RSI en {rsi:.1f}, dentro de rango neutral"
+
+            # MACD interpretation
+            if macd > macd_signal:
+                macd_interp = "MACD sobre signal line, momentum positivo"
+            else:
+                macd_interp = "MACD bajo signal line, momentum negativo"
+
+        except Exception:
+            rsi_interp = "RSI no disponible"
+            macd_interp = "MACD no disponible"
+
+        explanation = f"""
+**Analisis Tecnico USD/CLP (60 dias)**
+
+Este grafico muestra tres dimensiones tecnicas clave:
+- **Panel superior**: Precio con Bollinger Bands (±2σ) para identificar zonas de sobrecompra/sobreventa
+- **Panel medio**: RSI (14 periodos) - valores >70 indican sobrecompra, <30 sobreventa
+- **Panel inferior**: MACD con histograma - cruces indican cambios de momentum
+
+*Insight actual*: {rsi_interp} y {macd_interp}
+"""
+        return explanation
+
+    def _build_correlation_explanation(self) -> str:
+        """Build explanation for correlation matrix chart."""
+        explanation = """
+**Matriz de Correlaciones (60 dias)**
+
+Muestra las relaciones estadisticas entre USD/CLP y sus principales drivers globales:
+- **Correlacion negativa USD/CLP-Cobre** indica que alza del cobre fortalece el peso chileno
+- **VIX-EEM negativa** confirma que en risk-off, los emergentes caen
+- **DXY-EEM negativa** muestra que dolar fuerte perjudica emergentes
+
+*Uso practico*: Identifica que variable monitorear para anticipar movimientos del tipo de cambio
+"""
+        return explanation
+
+    def _build_macro_dashboard_explanation(self, bundle: DataBundle) -> str:
+        """Build explanation for macro dashboard chart."""
+        # Extract current values
+        copper = bundle.indicators.get("copper")
+        tpm = bundle.indicators.get("tpm")
+        dxy = bundle.indicators.get("dxy")
+        ipc = bundle.indicators.get("ipc")
+
+        macro_interp = "Ver grafico para interpretacion detallada de cada driver"
+        if copper and tpm:
+            macro_interp = (
+                f"Cobre en {copper.value:.2f} USD/lb y TPM en {tpm.value:.2f}% "
+                f"son los drivers fundamentales actuales"
+            )
+
+        explanation = f"""
+**Dashboard de Drivers Macroeconomicos**
+
+Vista integral de los 4 factores fundamentales que determinan USD/CLP:
+1. **Cobre vs USD/CLP**: Relacion historica inversa (cobre sube → CLP baja)
+2. **TPM Chile**: Tasa de politica monetaria del Banco Central
+3. **DXY**: Fortaleza del dolar a nivel global
+4. **IPC Chile**: Inflacion mensual que influye en decisiones de TPM
+
+*Lectura actual*: {macro_interp}
+"""
+        return explanation
+
+    def _build_regime_explanation(self, bundle: DataBundle) -> str:
+        """Build explanation for risk regime chart."""
+        from ..analysis.macro import compute_risk_gauge
+
+        try:
+            gauge = compute_risk_gauge(bundle)
+            regime = gauge.regime
+
+            if regime == "Risk-on":
+                regime_impl = "flujos de capital favorecen mercados emergentes, positivo para CLP"
+            elif regime == "Risk-off":
+                regime_impl = "aversion al riesgo presiona monedas emergentes, negativo para CLP"
+            else:
+                regime_impl = "señales mixtas, drivers locales tienen mayor peso"
+
+        except Exception:
+            regime = "No disponible"
+            regime_impl = "datos insuficientes para determinar regimen"
+
+        explanation = f"""
+**Regimen de Riesgo de Mercado (5 dias)**
+
+Identifica el apetito por riesgo global mediante 3 indicadores:
+- **DXY**: Dolar refugio - sube en risk-off
+- **VIX**: Volatilidad - alta indica risk-off
+- **EEM**: Emergentes - sube en risk-on
+
+*Regimen actual*: **{regime}** - {regime_impl}
+"""
+        return explanation
