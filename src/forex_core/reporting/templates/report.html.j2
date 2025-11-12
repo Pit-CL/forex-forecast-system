@@ -85,16 +85,50 @@
             background-color: #edf2f7;
         }
 
+        /* Chart blocks - keep chart + explanation together */
+        .chart-block {
+            margin: 24px 0;
+            page-break-inside: avoid;
+            background-color: #f9fafb;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 16px;
+        }
+
+        .chart-title {
+            font-size: 13pt;
+            font-weight: 600;
+            color: #1e5a96;
+            margin-bottom: 12px;
+        }
+
         /* Charts */
         img.chart {
             width: 100%;
             max-width: 100%;
             height: auto;
-            margin: 16px 0;
+            margin: 8px 0 12px 0;
             border: 1px solid #cbd5e0;
             border-radius: 4px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            page-break-inside: avoid;
+        }
+
+        /* Chart explanation box */
+        .chart-explanation {
+            margin-top: 12px;
+            padding: 12px 16px;
+            background-color: #ffffff;
+            border-left: 4px solid #4299e1;
+            border-radius: 4px;
+            font-size: 10pt;
+            font-style: italic;
+            color: #4a5568;
+            line-height: 1.5;
+        }
+
+        .chart-explanation strong {
+            font-style: normal;
+            color: #2d3748;
         }
 
         /* Metadata header */
@@ -196,10 +230,16 @@
         <strong>Generado:</strong> {{ generated_at }} | <strong>Zona horaria:</strong> {{ timezone }}
     </div>
 
-    <!-- Charts section -->
+    <!-- Charts section with explanations -->
     <div class="charts-section">
-        {% for chart in charts %}
-            <img src="{{ chart }}" class="chart" alt="Gráfico de análisis">
+        {% for block in chart_blocks %}
+            <div class="chart-block">
+                <div class="chart-title">{{ block.title }}</div>
+                <img src="{{ block.image }}" class="chart" alt="{{ block.title }}">
+                <div class="chart-explanation">
+                    <strong>Interpretación:</strong> {{ block.explanation }}
+                </div>
+            </div>
         {% endfor %}
     </div>
 

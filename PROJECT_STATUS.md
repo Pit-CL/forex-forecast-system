@@ -1,7 +1,7 @@
 # USD/CLP Forex Forecasting System - Project Status
 
 **Last Updated:** 2025-11-12
-**Version:** 2.0.0 (Institutional-Grade)
+**Version:** 2.1.0 (Professional Refinement)
 **Status:** IN PRODUCTION
 
 ---
@@ -26,7 +26,32 @@
 
 ## Recent Milestones
 
-### 2025-11-12: Institutional-Grade PDF Enhancement + Production Deployment
+### 2025-11-12 (Afternoon): Professional Refinement - Chart Formatting & Methodology
+
+**Status:** COMPLETED - Ready for Deployment
+
+**Major Improvements:**
+1. Fixed date label overlapping in 6 charts (critical UX issue)
+2. Added comprehensive methodology justification (186 lines)
+3. Created 4 chart explanation sections for didactic value (80 lines)
+4. Added academic-style source attribution to all charts
+5. Enhanced professional credibility to institutional standards
+
+**Key Metrics:**
+- Code Added: 349 lines (charting.py: 63, builder.py: 286)
+- Charts Fixed: 6 charts, 9 axes with date formatting
+- Methodology: 1 paragraph → 2-3 pages of justification
+- PDF Size: ~1.2 MB → ~1.5 MB (expected)
+- PDF Pages: 8-12 → 12-14 pages (expected)
+- Development Time: ~2 hours
+
+**Critical Fixes:**
+- Date labels now readable (45° rotation, max 6-8 ticks, format: "15-Nov")
+- Source captions: "Fuente: Elaboracion propia con datos de [sources]"
+- Ensemble model selection fully justified (ARIMA+VAR+RF rationale)
+- Chart explanations enable non-expert understanding
+
+### 2025-11-12 (Morning): Institutional-Grade PDF Enhancement + Production Deployment
 
 **Major Achievements:**
 1. Enhanced PDF from basic (3 pages, 2 charts) to institutional-grade (8-12 pages, 6 charts)
@@ -269,24 +294,31 @@ Production Deployment (Vultr):
 
 ### Issues (None Critical)
 
-1. **Test Coverage Below Target**
+1. **Refinement Changes Not Yet Deployed**
+   - Status: Code complete, pending deployment
+   - Changes: Date formatting fixes, methodology expansion
+   - Impact: None (backward compatible)
+   - Priority: High
+   - Next Action: Commit + deploy to Vultr
+
+2. **Test Coverage Below Target**
    - Current: 31%, Target: 80%
    - Impact: Low (core functionality tested)
    - Priority: Medium
    - Plan: Add 20+ tests for new sections/charts
 
-2. **No Historical Accuracy Tracking**
+3. **No Historical Accuracy Tracking**
    - Impact: Medium (can't measure model performance over time)
    - Priority: Medium
    - Plan: Implement in next sprint
 
-3. **Sequential Chart Generation**
+4. **Sequential Chart Generation**
    - Current: 3 seconds for 6 charts
    - Potential: 1 second with parallel generation
    - Impact: Low (only 2 seconds difference)
    - Priority: Low
 
-4. **Magic Numbers in Code**
+5. **Magic Numbers in Code**
    - Thresholds hardcoded (RSI 70/30, Bollinger 2.0)
    - Impact: Low (standard values)
    - Priority: Low
@@ -345,13 +377,25 @@ Resource Usage:
 
 ## Next Steps
 
+### Immediate (Today)
+
+- [ ] **Deploy Refinement Changes to Production**
+  - Commit: charting.py, builder.py modifications
+  - Push to GitHub main branch
+  - SSH to Vultr: `ssh reporting`
+  - Pull latest: `git pull origin main`
+  - Test execution: `python -m services.forecaster_7d.cli run`
+  - Verify PDF quality improvements
+  - Estimated: 10 minutes
+
 ### High Priority (Next 1-2 Weeks)
 
 - [ ] **Monitor Production for 7 Days**
   - Verify daily execution
   - Check log files for errors
-  - Validate PDF quality
+  - Validate PDF quality (especially chart date labels)
   - Ensure no crashes
+  - Confirm methodology section renders correctly
 
 - [ ] **Implement Failure Alerts**
   - Email notification on cron failure
@@ -360,14 +404,16 @@ Resource Usage:
   - Estimated: 2-3 hours
 
 - [ ] **Add Test Coverage for New Code**
-  - Test new chart methods
-  - Test new section methods
+  - Test new chart methods (_format_date_axis)
+  - Test new section methods (chart explanations)
+  - Test methodology section generation
   - Target: Maintain 31%+ coverage
   - Estimated: 1 day
 
 - [ ] **Gather User Feedback**
-  - Share PDFs with stakeholders
-  - Collect feedback on sections/charts
+  - Share refined PDFs with stakeholders
+  - Collect feedback on chart readability
+  - Validate methodology clarity
   - Prioritize improvements
   - Estimated: 1-2 hours
 
@@ -428,13 +474,14 @@ ab6382f - feat: Upgrade to institutional-grade PDF reports (2025-11-12)
 1. **PROJECT_STATUS.md** (this file) - Current status
 2. **MIGRATION_COMPLETE.md** - Migration summary
 3. **INSTITUTIONAL_UPGRADE_SUMMARY.md** - Enhancement summary
-4. **docs/sessions/SESSION_2025-11-12_INSTITUTIONAL_UPGRADE.md** - Detailed session log
-5. **docs/deployment/VULTR_DEPLOYMENT_GUIDE.md** - Production deployment guide
-6. **docs/architecture/SYSTEM_ARCHITECTURE.md** - Technical architecture
-7. **docs/reviews/2025-11-12-comprehensive-system-review.md** - Code review
-8. **docs/PDF_ENHANCEMENT_CHANGELOG.md** - PDF enhancement details
-9. **docs/DOCKER.md** - Docker usage guide
-10. **README.md** - Project overview
+4. **docs/sessions/SESSION_2025-11-12_INSTITUTIONAL_UPGRADE.md** - Institutional upgrade session
+5. **docs/sessions/SESSION_2025-11-12_REFINEMENT.md** - Professional refinement session (NEW)
+6. **docs/deployment/VULTR_DEPLOYMENT_GUIDE.md** - Production deployment guide
+7. **docs/architecture/SYSTEM_ARCHITECTURE.md** - Technical architecture
+8. **docs/reviews/2025-11-12-comprehensive-system-review.md** - Code review
+9. **docs/PDF_ENHANCEMENT_CHANGELOG.md** - PDF enhancement details
+10. **docs/DOCKER.md** - Docker usage guide
+11. **README.md** - Project overview
 
 ### Quick Start Commands
 
@@ -534,7 +581,15 @@ PDF Size                1.2 MB
 
 ## Version History
 
-### Version 2.0.0 (2025-11-12) - CURRENT
+### Version 2.1.0 (2025-11-12 PM) - CURRENT
+- Professional refinements applied
+- Fixed date label overlapping (6 charts, 9 axes)
+- Expanded methodology section (186 lines)
+- Added chart explanations (80 lines)
+- Academic source attribution on all charts
+- Ready for production deployment
+
+### Version 2.0.0 (2025-11-12 AM)
 - Institutional-grade PDF (8-12 pages, 6 charts)
 - 870+ lines of professional code
 - All analysis modules integrated

@@ -93,10 +93,10 @@ class ReportBuilder:
         Returns:
             Path to generated PDF file
         """
-        # Convert charts to base64
+        # Convert charts to base64 with explanations
         from .charting import ChartGenerator
 
-        chart_imgs = [ChartGenerator.image_to_base64(path) for path in charts.values()]
+        chart_blocks = self._build_chart_blocks(bundle, charts)
 
         # Build markdown sections
         markdown_body = self._build_markdown_sections(
@@ -110,7 +110,7 @@ class ReportBuilder:
         tz = ZoneInfo(self.settings.report_timezone)
         html_body = self.template.render(
             body=html_content,
-            charts=chart_imgs,
+            chart_blocks=chart_blocks,
             generated_at=datetime.now(tz).strftime("%Y-%m-%d %H:%M %Z"),
             timezone=self.settings.report_timezone,
         )
@@ -119,6 +119,93 @@ class ReportBuilder:
         pdf_path = self._write_pdf(html_body, horizon)
 
         return pdf_path
+
+    def _build_chart_blocks(
+        self,
+        bundle: DataBundle,
+        charts: Dict[str, Path],
+    ) -> List[Dict[str, str]]:
+        """
+        Build chart blocks with embedded explanations.
+
+        Args:
+            bundle: Data bundle for generating explanations
+            charts: Dictionary mapping chart names to file paths
+
+        Returns:
+            List of chart blocks, each containing:
+            - image: base64 encoded image
+            - title: chart title
+            - explanation: 2-3 sentence interpretation
+        """
+        from .charting import ChartGenerator
+
+        blocks = []
+
+        # Chart 1: Historical + Forecast
+        if "hist_forecast" in charts:
+            blocks.append({
+                "image": ChartGenerator.image_to_base64(charts["hist_forecast"]),
+                "title": "Proyección USD/CLP con Histórico",
+                "explanation": (
+                    "Evolución histórica de 60 días y proyección futura con intervalos de confianza. "
+                    "Las bandas grises representan incertidumbre: banda oscura (80% confianza), "
+                    "banda clara (95% confianza). El escenario central aparece en línea azul sólida."
+                ),
+            })
+
+        # Chart 2: Forecast Bands
+        if "forecast_bands" in charts:
+            blocks.append({
+                "image": ChartGenerator.image_to_base64(charts["forecast_bands"]),
+                "title": "Bandas de Proyección",
+                "explanation": (
+                    "Detalle de la proyección mostrando evolución esperada del tipo de cambio. "
+                    "La zona sombreada muestra el rango probable de movimiento según el modelo ensemble. "
+                    "Importante: mientras más angosta la banda, mayor certeza en la proyección."
+                ),
+            })
+
+        # Chart 3: Technical Panel
+        if "technical_panel" in charts:
+            explanation = self._get_technical_panel_explanation(bundle)
+            blocks.append({
+                "image": ChartGenerator.image_to_base64(charts["technical_panel"]),
+                "title": "Análisis Técnico USD/CLP",
+                "explanation": explanation,
+            })
+
+        # Chart 4: Correlation Matrix
+        if "correlation" in charts:
+            blocks.append({
+                "image": ChartGenerator.image_to_base64(charts["correlation"]),
+                "title": "Matriz de Correlaciones",
+                "explanation": (
+                    "Relaciones estadísticas entre USD/CLP y sus principales drivers. "
+                    "Correlación negativa USD/CLP-Cobre indica que alza del cobre fortalece el peso. "
+                    "VIX-EEM negativa confirma que en risk-off los emergentes caen."
+                ),
+            })
+
+        # Chart 5: Macro Dashboard
+        if "macro_drivers" in charts:
+            explanation = self._get_macro_dashboard_explanation(bundle)
+            blocks.append({
+                "image": ChartGenerator.image_to_base64(charts["macro_drivers"]),
+                "title": "Dashboard Macroeconómico",
+                "explanation": explanation,
+            })
+
+        # Chart 6: Risk Regime
+        if "risk_regime" in charts:
+            explanation = self._get_regime_explanation(bundle)
+            blocks.append({
+                "image": ChartGenerator.image_to_base64(charts["risk_regime"]),
+                "title": "Régimen de Riesgo de Mercado",
+                "explanation": explanation,
+            })
+
+        return blocks
 
     def _build_markdown_sections(
         self,
@@ -158,25 +245,15 @@ class ReportBuilder:
         sections.append("## Proyección Cuantitativa")
         sections.append(self._build_forecast_table(forecast))
 
-        # Chart explanation: Technical Panel
-        sections.append(self._build_technical_panel_explanation(bundle))
+        # NOTE: Chart explanations are now embedded with charts in template
 
         # Technical Analysis
         sections.append("## Análisis Técnico")
         sections.append(self._build_technical_analysis(bundle))
 
-        # Chart explanation: Correlation Matrix
-        sections.append(self._build_correlation_explanation())
-
-        # Chart explanation: Macro Dashboard
-        sections.append(self._build_macro_dashboard_explanation(bundle))
-
         # Risk Regime Assessment
         sections.append("## Régimen de Riesgo de Mercado")
         sections.append(self._build_risk_regime(bundle))
-
-        # Chart explanation: Risk Regime
-        sections.append(self._build_regime_explanation(bundle))
 
         # Fundamental Factors
         sections.append("## Factores Fundamentales")
@@ -727,8 +804,8 @@ Este enfoque captura mejor la incertidumbre que intervalos parametricos.
 
         return disclaimer
 
-    def _build_technical_panel_explanation(self, bundle: DataBundle) -> str:
-        """Build explanation for technical panel chart."""
+    def _get_technical_panel_explanation(self, bundle: DataBundle) -> str:
+        """Get concise explanation for technical panel chart."""
         from ..analysis.technical import compute_technicals
 
         try:
@@ -739,78 +816,52 @@ Este enfoque captura mejor la incertidumbre que intervalos parametricos.
 
             # RSI interpretation
             if rsi > 70:
-                rsi_interp = "RSI en sobrecompra (>70), sugiere posible corrección a la baja"
+                rsi_interp = "sobrecompra (>70)"
             elif rsi < 30:
-                rsi_interp = "RSI en sobreventa (<30), sugiere posible rebote alcista"
+                rsi_interp = "sobreventa (<30)"
             else:
-                rsi_interp = f"RSI en {rsi:.1f}, dentro de rango neutral"
+                rsi_interp = f"neutral ({rsi:.1f})"
 
             # MACD interpretation
             if macd > macd_signal:
-                macd_interp = "MACD sobre signal line, momentum positivo"
+                macd_interp = "momentum positivo"
             else:
-                macd_interp = "MACD bajo signal line, momentum negativo"
+                macd_interp = "momentum negativo"
 
-        except Exception:
-            rsi_interp = "RSI no disponible"
-            macd_interp = "MACD no disponible"
-
-        explanation = f"""
-**Analisis Tecnico USD/CLP (60 dias)**
-
-Este grafico muestra tres dimensiones tecnicas clave:
-- **Panel superior**: Precio con Bollinger Bands (±2σ) para identificar zonas de sobrecompra/sobreventa
-- **Panel medio**: RSI (14 periodos) - valores >70 indican sobrecompra, <30 sobreventa
-- **Panel inferior**: MACD con histograma - cruces indican cambios de momentum
-
-*Insight actual*: {rsi_interp} y {macd_interp}
-"""
-        return explanation
-
-    def _build_correlation_explanation(self) -> str:
-        """Build explanation for correlation matrix chart."""
-        explanation = """
-**Matriz de Correlaciones (60 dias)**
-
-Muestra las relaciones estadisticas entre USD/CLP y sus principales drivers globales:
-- **Correlacion negativa USD/CLP-Cobre** indica que alza del cobre fortalece el peso chileno
-- **VIX-EEM negativa** confirma que en risk-off, los emergentes caen
-- **DXY-EEM negativa** muestra que dolar fuerte perjudica emergentes
-
-*Uso practico*: Identifica que variable monitorear para anticipar movimientos del tipo de cambio
-"""
-        return explanation
-
-    def _build_macro_dashboard_explanation(self, bundle: DataBundle) -> str:
-        """Build explanation for macro dashboard chart."""
-        # Extract current values
-        copper = bundle.indicators.get("copper")
-        tpm = bundle.indicators.get("tpm")
-        dxy = bundle.indicators.get("dxy")
-        ipc = bundle.indicators.get("ipc")
-
-        macro_interp = "Ver grafico para interpretacion detallada de cada driver"
-        if copper and tpm:
-            macro_interp = (
-                f"Cobre en {copper.value:.2f} USD/lb y TPM en {tpm.value:.2f}% "
-                f"son los drivers fundamentales actuales"
+            return (
+                f"Tres paneles técnicos: precio con Bollinger Bands (bandas de volatilidad), "
+                f"RSI en {rsi_interp}, y MACD con {macd_interp}. "
+                f"Las Bollinger Bands señalan zonas de sobreextensión cuando el precio toca las bandas."
             )
 
-        explanation = f"""
-**Dashboard de Drivers Macroeconomicos**
+        except Exception:
+            return (
+                "Panel técnico mostrando precio con Bollinger Bands, RSI (14 períodos) para "
+                "identificar sobrecompra/sobreventa, y MACD para momentum direccional. "
+                "Datos técnicos no disponibles en este momento."
+            )
 
-Vista integral de los 4 factores fundamentales que determinan USD/CLP:
-1. **Cobre vs USD/CLP**: Relacion historica inversa (cobre sube → CLP baja)
-2. **TPM Chile**: Tasa de politica monetaria del Banco Central
-3. **DXY**: Fortaleza del dolar a nivel global
-4. **IPC Chile**: Inflacion mensual que influye en decisiones de TPM
 
-*Lectura actual*: {macro_interp}
-"""
-        return explanation
+    def _get_macro_dashboard_explanation(self, bundle: DataBundle) -> str:
+        """Get concise explanation for macro dashboard chart."""
+        copper = bundle.indicators.get("copper")
+        tpm = bundle.indicators.get("tpm")
 
-    def _build_regime_explanation(self, bundle: DataBundle) -> str:
-        """Build explanation for risk regime chart."""
+        if copper and tpm:
+            return (
+                f"Cuatro drivers fundamentales: Cobre ({copper.value:.2f} USD/lb) con relación inversa al USD/CLP, "
+                f"TPM ({tpm.value:.2f}%) que determina diferencial de tasas, DXY como proxy de fortaleza USD global, "
+                f"e IPC que guía política monetaria del BCCh."
+            )
+        else:
+            return (
+                "Panel integrado con los cuatro factores macroeconómicos clave: precio del Cobre (principal "
+                "exportación chilena), TPM (tasa de política monetaria), DXY (índice del dólar), e IPC (inflación). "
+                "Datos actuales no disponibles."
+            )
+
+    def _get_regime_explanation(self, bundle: DataBundle) -> str:
+        """Get concise explanation for risk regime chart."""
         from ..analysis.macro import compute_risk_gauge
 
         try:
@@ -818,24 +869,21 @@ Vista integral de los 4 factores fundamentales que determinan USD/CLP:
             regime = gauge.regime
 
             if regime == "Risk-on":
-                regime_impl = "flujos de capital favorecen mercados emergentes, positivo para CLP"
+                regime_desc = "Risk-On: apetito por riesgo favorable a emergentes, positivo para CLP"
             elif regime == "Risk-off":
-                regime_impl = "aversion al riesgo presiona monedas emergentes, negativo para CLP"
+                regime_desc = "Risk-Off: aversión al riesgo presiona CLP hacia depreciación"
             else:
-                regime_impl = "señales mixtas, drivers locales tienen mayor peso"
+                regime_desc = "Mixto: señales contradictorias, factores locales tienen mayor peso"
+
+            return (
+                f"Régimen actual: {regime_desc}. Calculado con DXY (dólar refugio), "
+                f"VIX (volatilidad implícita), y EEM (ETF emergentes). "
+                f"Cambios en 5 días: DXY {gauge.dxy_change:+.1f}%, VIX {gauge.vix_change:+.1f}%, EEM {gauge.eem_change:+.1f}%."
+            )
 
         except Exception:
-            regime = "No disponible"
-            regime_impl = "datos insuficientes para determinar regimen"
-
-        explanation = f"""
-**Regimen de Riesgo de Mercado (5 dias)**
-
-Identifica el apetito por riesgo global mediante 3 indicadores:
-- **DXY**: Dolar refugio - sube en risk-off
-- **VIX**: Volatilidad - alta indica risk-off
-- **EEM**: Emergentes - sube en risk-on
-
-*Regimen actual*: **{regime}** - {regime_impl}
-"""
-        return explanation
+            return (
+                "Indicador del apetito por riesgo global usando DXY, VIX y EEM. "
+                "En Risk-On, flujos favorecen emergentes (CLP aprecia). En Risk-Off, "
+                "capitales huyen a activos refugio (CLP deprecia). Datos no disponibles."
+            )
