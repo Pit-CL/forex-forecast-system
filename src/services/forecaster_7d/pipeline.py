@@ -143,16 +143,11 @@ def _generate_charts(
 ) -> dict[str, Path]:
     """
     Generate visualization charts for the report.
-
-    NOTE: Chart generation is not yet implemented in forex_core.
-    This is a placeholder for when ChartGenerator is available.
     """
-    logger.warning("Chart generation not yet implemented - placeholder")
-    # TODO: Implement when forex_core.reporting.ChartGenerator is ready
-    # from forex_core.reporting import ChartGenerator
-    # generator = ChartGenerator(settings)
-    # return generator.generate(bundle, forecast, title_suffix=service_config.chart_title_suffix)
-    return {}
+    from forex_core.reporting.charting import ChartGenerator
+
+    generator = ChartGenerator(settings)
+    return generator.generate(bundle, forecast, horizon=service_config.horizon)
 
 
 def _build_report(
@@ -165,26 +160,24 @@ def _build_report(
 ) -> Path:
     """
     Build PDF report with forecast results.
-
-    NOTE: Report building is not yet implemented in forex_core.
-    This is a placeholder for when ReportBuilder is available.
     """
-    logger.warning("Report building not yet implemented - placeholder")
-    # TODO: Implement when forex_core.reporting.ReportBuilder is ready
-    # from forex_core.reporting import ReportBuilder
-    # builder = ReportBuilder(settings)
-    # return builder.build(
-    #     bundle=bundle,
-    #     forecast=forecast,
-    #     artifacts=artifacts,
-    #     chart_paths=chart_paths,
-    #     title=service_config.report_title,
-    #     filename_prefix=service_config.report_filename_prefix
-    # )
+    from forex_core.reporting.builder import ReportBuilder
 
-    # Temporary: Return placeholder path
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return settings.output_dir / f"{service_config.report_filename_prefix}_{timestamp}.pdf"
+    builder = ReportBuilder(settings)
+
+    # Convert EnsembleArtifacts to dict format expected by builder
+    artifacts_dict = {
+        "weights": artifacts.weights if hasattr(artifacts, "weights") else {},
+        "models": artifacts.models if hasattr(artifacts, "models") else {},
+    }
+
+    return builder.build(
+        bundle=bundle,
+        forecast=forecast,
+        artifacts=artifacts_dict,
+        charts=chart_paths,
+        horizon=service_config.horizon,
+    )
 
 
 def _send_email(settings, report_path: Path) -> None:
@@ -246,7 +239,7 @@ def validate_forecast(bundle: DataBundle, forecast: ForecastPackage) -> bool:
         # Check for NaN
         if any(
             v is None or (isinstance(v, float) and v != v)  # NaN check
-            for v in [point.mean, point.lower, point.upper]
+            for v in [point.mean, point.ci95_low, point.ci95_high]
         ):
             logger.error(f"NaN value at forecast point {i}")
             return False
@@ -257,10 +250,10 @@ def validate_forecast(bundle: DataBundle, forecast: ForecastPackage) -> bool:
             return False
 
         # Check interval validity
-        if not (point.lower <= point.mean <= point.upper):
+        if not (point.ci95_low <= point.mean <= point.ci95_high):
             logger.error(
                 f"Invalid interval at point {i}: "
-                f"lower={point.lower}, mean={point.mean}, upper={point.upper}"
+                f"ci95_low={point.ci95_low}, mean={point.mean}, ci95_high={point.ci95_high}"
             )
             return False
 

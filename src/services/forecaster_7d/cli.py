@@ -178,8 +178,8 @@ def validate(
                     f"Day {i}",
                     point.date.strftime("%Y-%m-%d"),
                     f"{point.mean:.2f}",
-                    f"{point.lower:.2f}",
-                    f"{point.upper:.2f}",
+                    f"{point.ci95_low:.2f}",
+                    f"{point.ci95_high:.2f}",
                 )
 
             console.print(table)

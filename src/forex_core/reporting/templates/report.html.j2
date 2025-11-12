@@ -3,22 +3,209 @@
 <head>
     <meta charset="utf-8">
     <style>
-        body { font-family: "Helvetica Neue", Arial, sans-serif; margin: 24px; color: #1b1b1b; }
-        h1, h2, h3 { color: #0a1f44; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-        th, td { border: 1px solid #d0d0d0; padding: 6px 8px; font-size: 12px; }
-        th { background-color: #eef2f7; }
-        img.chart { width: 100%; margin: 12px 0; border: 1px solid #ddd; }
-        .meta { font-size: 12px; color: #555; margin-bottom: 12px; }
+        /* Professional institutional styling */
+        @page {
+            size: A4;
+            margin: 2cm 1.5cm;
+            @bottom-center {
+                content: counter(page);
+                font-size: 10px;
+                color: #666;
+            }
+        }
+
+        body {
+            font-family: "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #2c3e50;
+            line-height: 1.6;
+            font-size: 11pt;
+        }
+
+        /* Headers */
+        h1 {
+            color: #0a2f5c;
+            font-size: 24pt;
+            font-weight: 700;
+            margin-top: 0;
+            margin-bottom: 16px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #1e5a96;
+        }
+
+        h2 {
+            color: #1e5a96;
+            font-size: 16pt;
+            font-weight: 600;
+            margin-top: 24px;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #e1e8ed;
+            page-break-after: avoid;
+        }
+
+        h3 {
+            color: #34495e;
+            font-size: 13pt;
+            font-weight: 600;
+            margin-top: 16px;
+            margin-bottom: 10px;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0 20px 0;
+            font-size: 10pt;
+            page-break-inside: avoid;
+        }
+
+        th {
+            background: linear-gradient(to bottom, #f8fafc, #e8eef4);
+            color: #0a2f5c;
+            font-weight: 600;
+            padding: 10px 12px;
+            border: 1px solid #cbd5e0;
+            text-align: left;
+        }
+
+        td {
+            border: 1px solid #e2e8f0;
+            padding: 8px 12px;
+            background-color: #ffffff;
+        }
+
+        tr:nth-child(even) td {
+            background-color: #f8fafc;
+        }
+
+        tr:hover td {
+            background-color: #edf2f7;
+        }
+
+        /* Charts */
+        img.chart {
+            width: 100%;
+            max-width: 100%;
+            height: auto;
+            margin: 16px 0;
+            border: 1px solid #cbd5e0;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            page-break-inside: avoid;
+        }
+
+        /* Metadata header */
+        .meta {
+            font-size: 9pt;
+            color: #718096;
+            margin-bottom: 20px;
+            padding: 10px 15px;
+            background-color: #f7fafc;
+            border-left: 4px solid #1e5a96;
+            border-radius: 4px;
+        }
+
+        .meta strong {
+            color: #2d3748;
+        }
+
+        /* Paragraphs */
+        p {
+            margin-bottom: 12px;
+            text-align: justify;
+        }
+
+        /* Bold text */
+        strong {
+            color: #1a202c;
+            font-weight: 600;
+        }
+
+        /* Lists */
+        ul, ol {
+            margin-bottom: 12px;
+            padding-left: 24px;
+        }
+
+        li {
+            margin-bottom: 6px;
+        }
+
+        /* Code/monospace */
+        code {
+            font-family: "Courier New", monospace;
+            background-color: #f7fafc;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10pt;
+        }
+
+        /* Blockquotes */
+        blockquote {
+            margin: 16px 0;
+            padding: 12px 20px;
+            background-color: #f7fafc;
+            border-left: 4px solid #4299e1;
+            font-style: italic;
+        }
+
+        /* Page breaks */
+        .page-break {
+            page-break-before: always;
+        }
+
+        /* Footer disclaimer box */
+        .disclaimer-box {
+            margin-top: 24px;
+            padding: 16px;
+            background-color: #fffaf0;
+            border: 2px solid #f6ad55;
+            border-radius: 6px;
+            font-size: 9pt;
+            page-break-inside: avoid;
+        }
+
+        /* Sections spacing */
+        .section {
+            margin-bottom: 24px;
+        }
+
+        /* Print optimizations */
+        @media print {
+            body {
+                background: white;
+            }
+
+            .no-print {
+                display: none;
+            }
+
+            a {
+                color: #2c5282;
+                text-decoration: none;
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- Header metadata -->
     <div class="meta">
-        Generado: {{ generated_at }} | Zona horaria: {{ timezone }}
+        <strong>Generado:</strong> {{ generated_at }} | <strong>Zona horaria:</strong> {{ timezone }}
     </div>
-    {% for chart in charts %}
-        <img src="{{ chart }}" class="chart" alt="chart">
-    {% endfor %}
-    <div>{{ body | safe }}</div>
+
+    <!-- Charts section -->
+    <div class="charts-section">
+        {% for chart in charts %}
+            <img src="{{ chart }}" class="chart" alt="Gráfico de análisis">
+        {% endfor %}
+    </div>
+
+    <!-- Main content -->
+    <div class="content-section">
+        {{ body | safe }}
+    </div>
 </body>
 </html>
