@@ -240,8 +240,12 @@ def _detect_drift(settings, bundle: DataBundle) -> Optional[DriftReport]:
         DriftReport if drift detection succeeds, None otherwise.
     """
     try:
-        detector = DataDriftDetector(settings)
-        return detector.detect(bundle.usdclp_series)
+        detector = DataDriftDetector(
+            baseline_window=settings.drift_baseline_window,
+            test_window=settings.drift_test_window,
+            alpha=settings.drift_alpha
+        )
+        return detector.generate_drift_report(bundle.usdclp_series)
     except Exception as e:
         logger.warning(f"Drift detection failed: {e}")
         return None
