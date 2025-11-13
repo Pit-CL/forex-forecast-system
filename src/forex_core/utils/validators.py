@@ -157,7 +157,7 @@ def validate_positive_integer(
 
 
 def sanitize_filename(filename: str, max_length: int = 255) -> str:
-    """
+    r"""
     Sanitize a filename to prevent path traversal and injection attacks.
 
     Removes or replaces dangerous characters:
