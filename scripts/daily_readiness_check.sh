@@ -24,7 +24,7 @@ echo "=========================================="
 echo ""
 
 # Run readiness check
-if python scripts/check_chronos_readiness.py --data-dir data; then
+if python3 scripts/check_chronos_readiness.py --data-dir data; then
     READINESS_STATUS="READY"
     EXIT_CODE=0
 elif [ $? -eq 2 ]; then
@@ -54,7 +54,7 @@ if [ "$READINESS_STATUS" = "READY" ]; then
     echo "  3. Restart services: docker compose restart"
     echo ""
     echo "Or use auto-enable (with caution):"
-    echo "  python scripts/check_chronos_readiness.py auto-enable"
+    echo "  python3 scripts/check_chronos_readiness.py auto-enable"
     echo ""
 fi
 
