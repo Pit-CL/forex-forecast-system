@@ -374,3 +374,57 @@ Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')} (Chile)
         )
 
         return body
+
+    def send_html_email(
+        self,
+        subject: str,
+        html_body: str,
+        text_body: str | None = None,
+    ) -> None:
+        """
+        Send HTML email without attachments.
+
+        Args:
+            subject: Email subject line
+            html_body: HTML content for email body
+            text_body: Plain text fallback (auto-generated from HTML if None)
+
+        Raises:
+            smtplib.SMTPException: If email sending fails
+        """
+        logger.info(
+            f"Sending HTML email: {subject}",
+            extra={"recipients": len(self.recipients)},
+        )
+
+        # Create message with HTML
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        message = MIMEMultipart("alternative")
+        message["Subject"] = subject
+        message["From"] = self.gmail_user
+        message["To"] = ", ".join(self.recipients)
+
+        # Plain text fallback
+        if text_body is None:
+            # Simple HTML to text conversion
+            import re
+            text_body = re.sub(r'<[^>]+>', '', html_body)
+
+        # Attach both plain text and HTML
+        part1 = MIMEText(text_body, "plain")
+        part2 = MIMEText(html_body, "html")
+
+        message.attach(part1)
+        message.attach(part2)
+
+        # Send via SMTP
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(self.gmail_user, self.gmail_password)
+            server.send_message(message)
+
+        logger.info(
+            "HTML email sent successfully",
+            extra={"recipients": self.recipients, "subject": subject},
+        )
