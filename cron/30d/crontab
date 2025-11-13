@@ -1,0 +1,6 @@
+# USD/CLP 30-Day Forecast - Day 1 at 9:30 AM Chile time
+30 9 1 * * cd /app && python -m services.forecaster_30d.cli run >> /var/log/cron.log 2>&1
+
+# Health check - write timestamp every hour
+0 * * * * date > /tmp/healthcheck
+

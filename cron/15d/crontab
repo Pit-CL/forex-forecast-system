@@ -1,0 +1,6 @@
+# USD/CLP 15-Day Forecast - Day 1 and 15 at 9:00 AM Chile time
+0 9 1,15 * * cd /app && python -m services.forecaster_15d.cli run >> /var/log/cron.log 2>&1
+
+# Health check - write timestamp every hour
+0 * * * * date > /tmp/healthcheck
+
