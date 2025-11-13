@@ -223,7 +223,7 @@ def _send_email(
     sender.send(
         report_path=report_path,
         bundle=bundle,
-        forecast=forecast.result,
+        forecast=forecast,
         horizon=service_config.horizon_code,
     )
 
