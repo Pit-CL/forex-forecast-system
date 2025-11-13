@@ -148,9 +148,9 @@ class ReportBuilder:
                 "image": ChartGenerator.image_to_base64(charts["hist_forecast"]),
                 "title": "Proyección USD/CLP con Histórico",
                 "explanation": (
-                    "Evolución histórica de 60 días y proyección futura con intervalos de confianza. "
-                    "Las bandas grises representan incertidumbre: banda oscura (80% confianza), "
-                    "banda clara (95% confianza). El escenario central aparece en línea azul sólida."
+                    "Evolución histórica de 30 días y proyección futura con intervalos de confianza. "
+                    "La banda naranja (IC 80%) muestra el rango más probable, mientras que la banda violeta "
+                    "(IC 95%) captura escenarios extremos. El escenario central aparece en línea roja sólida."
                 ),
             })
 
@@ -161,8 +161,8 @@ class ReportBuilder:
                 "title": "Bandas de Proyección",
                 "explanation": (
                     "Detalle de la proyección mostrando evolución esperada del tipo de cambio. "
-                    "La zona sombreada muestra el rango probable de movimiento según el modelo ensemble. "
-                    "Importante: mientras más angosta la banda, mayor certeza en la proyección."
+                    "La banda naranja (IC 80%) contiene el 80% de escenarios probables, mientras que la banda violeta "
+                    "(IC 95%) representa el rango extendido. Mientras más angosta la banda, mayor certeza en la proyección."
                 ),
             })
 

@@ -166,21 +166,21 @@ class ChartGenerator:
             ax=ax, label="Proyección media", color="#d62728", linewidth=2
         )
 
-        # Plot confidence intervals
+        # Plot confidence intervals with distinct colors
         ax.fill_between(
             fc_df.index,
             fc_df["ci80_low"],
             fc_df["ci80_high"],
-            color="#ff9896",
-            alpha=0.3,
+            color="#FF8C00",  # Orange for 80% CI
+            alpha=0.35,
             label="IC 80%",
         )
         ax.fill_between(
             fc_df.index,
             fc_df["ci95_low"],
             fc_df["ci95_high"],
-            color="#c5b0d5",
-            alpha=0.2,
+            color="#8B00FF",  # Violet for 95% CI
+            alpha=0.25,
             label="IC 95%",
         )
 
@@ -234,21 +234,21 @@ class ChartGenerator:
             ax=ax, color="#2ca02c", label="Media proyectada", linewidth=2
         )
 
-        # Plot confidence intervals
+        # Plot confidence intervals with distinct colors
         ax.fill_between(
             fc_df.index,
             fc_df["ci80_low"],
             fc_df["ci80_high"],
-            alpha=0.3,
-            color="#98df8a",
+            alpha=0.35,
+            color="#FF8C00",  # Orange for 80% CI
             label="IC 80%",
         )
         ax.fill_between(
             fc_df.index,
             fc_df["ci95_low"],
             fc_df["ci95_high"],
-            alpha=0.2,
-            color="#c7e9c0",
+            alpha=0.25,
+            color="#8B00FF",  # Violet for 95% CI
             label="IC 95%",
         )
 
