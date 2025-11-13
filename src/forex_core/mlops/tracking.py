@@ -597,5 +597,51 @@ class PredictionTracker:
             logger.error(f"Failed to get predictions summary: {e}")
             return pd.DataFrame()
 
+    def get_latest_prediction(self, horizon: str) -> Optional[Dict]:
+        """
+        Get the most recent prediction for a specific horizon.
+
+        Args:
+            horizon: Forecast horizon ("7d", "15d", "30d", "90d").
+
+        Returns:
+            Dictionary with latest prediction data, or None if no predictions exist.
+            Keys: forecast_date, target_date, prediction, ci95_low, ci95_high.
+
+        Example:
+            >>> tracker = PredictionTracker()
+            >>> latest = tracker.get_latest_prediction("7d")
+            >>> if latest:
+            ...     print(f"Latest 7d forecast: {latest['prediction']:.2f}")
+        """
+        try:
+            if not self.storage_path.exists() or self.storage_path.stat().st_size == 0:
+                logger.debug(f"No predictions available for {horizon}")
+                return None
+
+            df = pd.read_parquet(self.storage_path)
+
+            # Filter by horizon
+            horizon_df = df[df["horizon"] == horizon].copy()
+
+            if len(horizon_df) == 0:
+                logger.debug(f"No predictions found for horizon {horizon}")
+                return None
+
+            # Get most recent forecast
+            latest_row = horizon_df.loc[horizon_df["forecast_date"].idxmax()]
+
+            return {
+                "forecast_date": latest_row["forecast_date"],
+                "target_date": latest_row["target_date"],
+                "prediction": latest_row["predicted_mean"],
+                "ci95_low": latest_row["ci95_low"],
+                "ci95_high": latest_row["ci95_high"],
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get latest prediction for {horizon}: {e}")
+            return None
+
 
 __all__ = ["PredictionTracker"]
