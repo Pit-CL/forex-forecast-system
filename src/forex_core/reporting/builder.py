@@ -499,7 +499,7 @@ Este enfoque captura mejor la incertidumbre que intervalos parametricos.
         output_dir = Path(self.settings.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = f"usdclp_report_{horizon}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        filename = f"usdclp_{horizon}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
         pdf_path = output_dir / filename
 
         HTML(string=html_body, base_url=str(output_dir)).write_pdf(str(pdf_path))

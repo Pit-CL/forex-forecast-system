@@ -212,14 +212,37 @@ def _send_email(
         forecast: ForecastPackage with forecast results
         service_config: Service configuration with horizon info
     """
+    from forex_core.mlops.alerts import AlertManager
     from forex_core.notifications.email import EmailSender
 
+    # Evaluate alert conditions
+    alert_manager = AlertManager(data_dir=settings.data_dir)
+    alert_decision = alert_manager.evaluate_alert(
+        horizon=service_config.horizon_code,
+        forecast=forecast,
+        bundle=bundle,
+    )
+
+    # Log alert decision
+    alert_manager.log_alert_decision(alert_decision, service_config.horizon_code)
+
+    # Log summary to console
+    if alert_decision.should_alert:
+        logger.warning(
+            f"Alert triggered: {alert_decision.reason} "
+            f"(severity: {alert_decision.severity.value})"
+        )
+    else:
+        logger.info(f"No alert: {alert_decision.reason}")
+
+    # Send email with alert context
     sender = EmailSender(settings)
     sender.send(
         report_path=report_path,
         bundle=bundle,
         forecast=forecast,
         horizon=service_config.horizon_code,
+        alert_decision=alert_decision,
     )
 
 

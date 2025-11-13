@@ -169,6 +169,7 @@ Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')} (Chile)
         bundle = None,
         forecast = None,
         horizon: str = "7d",
+        alert_decision = None,
     ) -> None:
         """
         Send email with PDF report attachment.
@@ -181,6 +182,7 @@ Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')} (Chile)
             bundle: DataBundle for generating executive summary
             forecast: ForecastResult for generating executive summary
             horizon: Forecast horizon code (e.g., "7d", "15d")
+            alert_decision: Optional AlertDecision for dynamic subject
 
         Raises:
             smtplib.SMTPException: If email sending fails
@@ -192,20 +194,9 @@ Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')} (Chile)
         # Generate subject with date and bias if bundle/forecast provided
         if subject is None:
             if bundle is not None and forecast is not None:
-                current_price = bundle.usdclp_series.iloc[-1]
-                fc_last = forecast.series[-1]
-                fc_change_pct = ((fc_last.mean / current_price) - 1) * 100
-
-                if fc_change_pct > 0.3:
-                    bias_label = "ALCISTA 📈"
-                elif fc_change_pct < -0.3:
-                    bias_label = "BAJISTA 📉"
-                else:
-                    bias_label = "NEUTRAL ➡️"
-
-                date_str = pd.Timestamp.now().strftime('%Y-%m-%d')
-                horizon_label = HORIZON_LABELS.get(horizon, horizon)
-                subject = f"[USD/CLP] Proyección {horizon_label} - {date_str} - {bias_label}"
+                subject = self._generate_dynamic_subject(
+                    bundle, forecast, horizon, alert_decision
+                )
             else:
                 subject = self._generate_subject(report_path)
 
@@ -278,6 +269,65 @@ Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')} (Chile)
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(self.gmail_user, self.gmail_password)
             server.send_message(message)
+
+    def _generate_dynamic_subject(
+        self,
+        bundle,
+        forecast,
+        horizon: str,
+        alert_decision=None,
+    ) -> str:
+        """
+        Generate dynamic email subject with forecast metrics and alerts.
+
+        Args:
+            bundle: DataBundle with current data
+            forecast: ForecastPackage with predictions
+            horizon: Forecast horizon (e.g., "7d", "15d")
+            alert_decision: Optional AlertDecision with detected events
+
+        Returns:
+            Dynamic subject string with metrics and context
+        """
+        # Get current price and forecast
+        current_price = bundle.usdclp_series.iloc[-1]
+        fc_last = forecast.series[-1]
+        fc_mean = fc_last.mean
+        fc_change_pct = ((fc_mean / current_price) - 1) * 100
+
+        # Get horizon label
+        horizon_label = HORIZON_LABELS.get(horizon, horizon)
+
+        # Base subject with prices
+        base = f"USD/CLP {horizon}: ${current_price:.0f} → ${fc_mean:.0f} ({fc_change_pct:+.1f}%)"
+
+        # Add alert prefix and context if available
+        if alert_decision and alert_decision.should_alert:
+            prefix = alert_decision.get_subject_prefix()
+            event_summary = alert_decision.get_event_summary()
+
+            # Build full subject with alert context
+            subject = f"{prefix} {base} | {event_summary}"
+        else:
+            # No alert - add contextual information
+            context_parts = []
+
+            # Add regime if available
+            if hasattr(bundle, "risk_regime") and bundle.risk_regime:
+                context_parts.append(f"Regime: {bundle.risk_regime}")
+
+            # Add bias
+            if fc_change_pct > 0.3:
+                context_parts.append("Sesgo Alcista")
+            elif fc_change_pct < -0.3:
+                context_parts.append("Sesgo Bajista")
+            else:
+                context_parts.append("Neutral")
+
+            context = " | ".join(context_parts) if context_parts else ""
+            subject = f"📊 {base} | {context}" if context else f"📊 {base}"
+
+        return subject
 
     def _generate_subject(self, report_path: Path) -> str:
         """

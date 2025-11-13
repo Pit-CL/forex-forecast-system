@@ -1,5 +1,5 @@
-# USD/CLP 90-Day Forecast - Day 1 at 10:00 AM Chile time
-0 10 1 * * cd /app && python -m services.forecaster_90d.cli run >> /var/log/cron.log 2>&1
+# USD/CLP 90-Day Forecast - Quarterly (Jan, Apr, Jul, Oct) at 10:00 AM Chile time
+0 10 1 1,4,7,10 * cd /app && python -m services.forecaster_90d.cli run >> /var/log/cron.log 2>&1
 
 # Health check - write timestamp every hour
 0 * * * * date > /tmp/healthcheck
