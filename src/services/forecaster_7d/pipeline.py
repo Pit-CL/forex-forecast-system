@@ -19,6 +19,7 @@ from forex_core.config import get_settings
 from forex_core.data import DataBundle, DataLoader
 from forex_core.data.models import ForecastPackage
 from forex_core.forecasting import ForecastEngine, EnsembleArtifacts
+from forex_core.mlops import DataDriftDetector, DriftReport, PredictionTracker
 from forex_core.utils.logging import logger
 
 from .config import get_service_config
@@ -74,6 +75,12 @@ def run_forecast_pipeline(
         settings.ensure_directories()
 
     try:
+        # Step 0: Initialize prediction tracker and update actuals
+        logger.info("Initializing prediction tracker...")
+        tracker = PredictionTracker()
+        updated_count = tracker.update_actuals(lookback_days=180)
+        logger.info(f"Updated {updated_count} predictions with actual values")
+
         # Step 1: Load data
         logger.info("Loading data from providers...")
         loader = DataLoader(settings)
@@ -83,6 +90,11 @@ def run_forecast_pipeline(
             f"{len(bundle.sources)} sources"
         )
 
+        # Step 1.5: Run drift detection
+        logger.info("Running drift detection on USD/CLP series...")
+        drift_report = _detect_drift(settings, bundle)
+        _log_drift_results(drift_report)
+
         # Step 2: Generate forecast
         logger.info(f"Generating {service_config.projection_days}-day forecast...")
         forecast, artifacts = _generate_forecast(settings, service_config, bundle)
@@ -90,6 +102,14 @@ def run_forecast_pipeline(
             f"Forecast generated: {len(forecast.series)} points, "
             f"final mean: {forecast.series[-1].mean:.2f}"
         )
+
+        # Step 2.5: Log predictions for tracking
+        logger.info("Logging predictions to tracker...")
+        _log_predictions(tracker, start_time, forecast, service_config.horizon_code)
+
+        # Step 2.6: Get recent performance metrics
+        perf = tracker.get_recent_performance(horizon=service_config.horizon_code, days=60)
+        _log_performance_metrics(perf, service_config.horizon_code)
 
         # Step 3: Generate charts
         logger.info("Creating visualization charts...")
@@ -206,6 +226,101 @@ def _send_email(
         forecast=forecast.result,
         horizon=service_config.horizon_code,
     )
+
+
+def _detect_drift(settings, bundle: DataBundle) -> Optional[DriftReport]:
+    """
+    Detect data drift in USD/CLP series.
+
+    Args:
+        settings: System settings.
+        bundle: DataBundle with USD/CLP series.
+
+    Returns:
+        DriftReport if drift detection succeeds, None otherwise.
+    """
+    try:
+        detector = DataDriftDetector(settings)
+        return detector.detect(bundle.usdclp_series)
+    except Exception as e:
+        logger.warning(f"Drift detection failed: {e}")
+        return None
+
+
+def _log_drift_results(drift_report: Optional[DriftReport]) -> None:
+    """
+    Log drift detection results.
+
+    Args:
+        drift_report: DriftReport from detector.
+    """
+    if drift_report is None:
+        logger.info("Drift detection: skipped")
+        return
+
+    logger.info(f"Drift detection: severity={drift_report.severity}")
+    if hasattr(drift_report, "details"):
+        logger.debug(f"Drift details: {drift_report.details}")
+
+
+def _log_predictions(
+    tracker: PredictionTracker,
+    forecast_date: datetime,
+    forecast: ForecastPackage,
+    horizon: str,
+) -> None:
+    """
+    Log all forecast points to the prediction tracker.
+
+    Args:
+        tracker: PredictionTracker instance.
+        forecast_date: When this forecast was generated.
+        forecast: ForecastPackage with predictions to log.
+        horizon: Forecast horizon code ("7d", "15d", "30d", "90d").
+    """
+    try:
+        for point in forecast.series:
+            tracker.log_prediction(
+                forecast_date=forecast_date,
+                horizon=horizon,
+                target_date=point.date,
+                predicted_mean=point.mean,
+                ci95_low=point.ci95_low,
+                ci95_high=point.ci95_high,
+            )
+        logger.success(f"Logged {len(forecast.series)} predictions to tracker")
+    except Exception as e:
+        logger.error(f"Failed to log predictions: {e}")
+
+
+def _log_performance_metrics(perf: dict, horizon: str) -> None:
+    """
+    Log out-of-sample performance metrics to logger.
+
+    Args:
+        perf: Performance metrics dictionary from tracker.
+        horizon: Forecast horizon for context.
+    """
+    if perf["n_predictions"] == 0:
+        logger.info(
+            f"No out-of-sample performance data yet for {horizon} "
+            f"({perf['n_total']} predictions pending)"
+        )
+        return
+
+    logger.info(f"=== Out-of-Sample Performance ({horizon}, last 60 days) ===")
+    logger.info(f"  Sample size: {perf['n_predictions']}/{perf['n_total']} predictions")
+
+    if perf["rmse"] is not None:
+        logger.info(f"  RMSE: {perf['rmse']:.2f} CLP")
+    if perf["mae"] is not None:
+        logger.info(f"  MAE: {perf['mae']:.2f} CLP")
+    if perf["mape"] is not None:
+        logger.info(f"  MAPE: {perf['mape']:.2%}")
+    if perf["ci95_coverage"] is not None:
+        logger.info(f"  CI95 Coverage: {perf['ci95_coverage']:.1%}")
+    if perf["directional_accuracy"] is not None:
+        logger.info(f"  Directional Accuracy: {perf['directional_accuracy']:.1%}")
 
 
 def validate_forecast(bundle: DataBundle, forecast: ForecastPackage) -> bool:

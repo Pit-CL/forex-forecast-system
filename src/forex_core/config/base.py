@@ -10,6 +10,7 @@ environment variables or .env files. It supports:
 - Model configuration (ARIMA, VAR, RF toggles)
 - Proxy settings
 - Cache settings
+- Drift detection parameters (window sizes, significance levels)
 
 The Settings class uses Pydantic for validation and type safety.
 """
@@ -174,10 +175,47 @@ class Settings(BaseSettings):
         alias="ENABLE_RF",
         description="Enable Random Forest forecasting model",
     )
+    enable_chronos: bool = Field(
+        default=False,
+        alias="ENABLE_CHRONOS",
+        description="Enable Chronos-Bolt-Small deep learning forecasting model",
+    )
+    chronos_context_length: int = Field(
+        default=180,
+        alias="CHRONOS_CONTEXT_LENGTH",
+        description="Context length for Chronos model (days of history)",
+    )
+    chronos_num_samples: int = Field(
+        default=100,
+        alias="CHRONOS_NUM_SAMPLES",
+        description="Number of probabilistic samples for Chronos forecasts",
+    )
     ensemble_window: int = Field(
         default=30,
         alias="ENSEMBLE_WINDOW",
         description="Window size for ensemble model weighting",
+    )
+
+    # Drift detection configuration
+    drift_baseline_window: int = Field(
+        default=90,
+        alias="DRIFT_BASELINE_WINDOW",
+        description="Number of days for drift detection baseline window",
+    )
+    drift_test_window: int = Field(
+        default=30,
+        alias="DRIFT_TEST_WINDOW",
+        description="Number of days for drift detection test window",
+    )
+    drift_alpha: float = Field(
+        default=0.05,
+        alias="DRIFT_ALPHA",
+        description="Significance level for drift detection statistical tests",
+    )
+    drift_alert_threshold: str = Field(
+        default="medium",
+        alias="DRIFT_ALERT_THRESHOLD",
+        description="Minimum severity level to trigger alerts (none, low, medium, high)",
     )
 
     @field_validator("email_recipients", mode="before")

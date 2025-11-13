@@ -34,6 +34,11 @@ arch>=6.3
 scikit-learn>=1.5
 scipy>=1.11
 
+# Deep learning and time series foundation models
+torch>=2.0.0
+chronos-forecasting>=1.2.0,<2.0.0  # Pin to 1.x to avoid breaking changes
+psutil>=5.9
+
 # PDF generation
 jinja2>=3.1
 weasyprint>=62.3

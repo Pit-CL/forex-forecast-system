@@ -20,6 +20,7 @@ from typing import Dict, Tuple, TYPE_CHECKING, Literal
 
 import numpy as np
 import pandas as pd
+import psutil
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 
@@ -145,6 +146,12 @@ class ForecastEngine:
                 )
             except Exception as exc:
                 logger.warning(f"Random Forest failed: {exc}")
+
+        if self.config.enable_chronos:
+            try:
+                results["chronos"] = self._run_chronos(usdclp_series, self.steps)
+            except Exception as exc:
+                logger.warning(f"Chronos failed: {exc}")
 
         if not results:
             raise RuntimeError("No models executed successfully.")
@@ -380,6 +387,84 @@ class ForecastEngine:
             rmse=rmse,
             mape=mape,
             extras={"estimators": 400},
+        )
+
+    def _run_chronos(
+        self,
+        series: pd.Series,
+        steps: int
+    ) -> ModelResult:
+        """Run Chronos-Bolt-Small deep learning model."""
+        # Check available memory before loading model
+        available_memory_mb = psutil.virtual_memory().available / (1024 * 1024)
+        required_memory_mb = 800  # Conservative estimate
+
+        if available_memory_mb < required_memory_mb:
+            raise MemoryError(
+                f"Insufficient memory for Chronos: {available_memory_mb:.0f}MB "
+                f"available, {required_memory_mb}MB required"
+            )
+
+        logger.info(
+            f"Running Chronos model (available RAM: {available_memory_mb:.0f}MB)"
+        )
+
+        # Determine context length based on horizon
+        # Short-term (7d, 15d): 180 days (6 months)
+        # Medium-term (30d): 90 days (3 months)
+        # Long-term (90d+): 365 days (1 year)
+        if steps <= 15:
+            context_length = 180
+        elif steps <= 30:
+            context_length = 90
+        else:
+            context_length = 365
+
+        # Import Chronos module (lazy loading to avoid startup overhead)
+        try:
+            from .chronos_model import forecast_chronos
+        except ImportError as exc:
+            logger.error("chronos_model module not found or dependencies missing")
+            raise ImportError(
+                "Chronos integration requires: pip install chronos-forecasting"
+            ) from exc
+
+        # Generate forecast
+        package = forecast_chronos(
+            series=series,
+            steps=steps,
+            context_length=context_length,
+            num_samples=100,  # Good balance of accuracy vs speed
+            temperature=1.0,
+            validate=True,
+            validation_window=30,
+        )
+
+        # Extract metrics from package
+        rmse = package.error_metrics.get("pseudo_RMSE", 0.0)
+        mape = package.error_metrics.get("pseudo_MAPE", 0.0)
+
+        # If validation failed (NaN), use conservative fallback
+        if np.isnan(rmse) or rmse == 0.0:
+            # Estimate based on residual volatility
+            rmse = package.residual_vol * 1.5
+            logger.warning(
+                f"Chronos validation failed, using fallback RMSE: {rmse:.4f}"
+            )
+
+        if np.isnan(mape) or mape == 0.0:
+            mape = rmse / series.mean()
+
+        return ModelResult(
+            name="chronos",
+            package=package,
+            rmse=rmse,
+            mape=mape,
+            extras={
+                "context_length": context_length,
+                "num_samples": 100,
+                "model_variant": "chronos-bolt-small",
+            },
         )
 
     def _build_points(
