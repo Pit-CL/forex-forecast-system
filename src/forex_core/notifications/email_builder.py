@@ -1,16 +1,16 @@
 """
 Email Content Builder for Unified USD/CLP Emails.
 
-This module generates responsive HTML emails with collapsible sections,
-inline chart previews, and mobile-first design for the unified email system.
+This module generates responsive HTML emails with inline chart previews
+and mobile-first design for the unified email system.
 
 Features:
 - Executive summary always visible
-- Collapsible forecast sections
+- Forecast sections with detailed metrics
 - Inline chart previews (base64 encoded)
 - System health dashboard integration
 - Mobile-responsive design
-- Progressive disclosure UX
+- All content in Spanish
 
 Author: Forex Forecast System
 License: MIT
@@ -39,7 +39,7 @@ class EmailContentBuilder:
 
     Generates responsive, mobile-first email HTML with:
     - Executive summary section
-    - Collapsible forecast sections (one per horizon)
+    - Forecast sections (one per horizon)
     - System health dashboard
     - Performance metrics
     - Inline chart previews
@@ -115,14 +115,7 @@ class EmailContentBuilder:
         .section-header {
             background: #f8f9fa;
             padding: 15px 20px;
-            cursor: pointer;
             border-bottom: 1px solid #e9ecef;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .section-header:hover {
-            background: #e9ecef;
         }
         .section-header h3 {
             margin: 0;
@@ -321,10 +314,26 @@ class EmailContentBuilder:
 
         icon = priority_icons.get(priority, "📊")
 
+        # Spanish day and month names
+        dias = {
+            'Monday': 'Lunes', 'Tuesday': 'Martes', 'Wednesday': 'Miércoles',
+            'Thursday': 'Jueves', 'Friday': 'Viernes', 'Saturday': 'Sábado', 'Sunday': 'Domingo'
+        }
+        meses = {
+            'January': 'Enero', 'February': 'Febrero', 'March': 'Marzo', 'April': 'Abril',
+            'May': 'Mayo', 'June': 'Junio', 'July': 'Julio', 'August': 'Agosto',
+            'September': 'Septiembre', 'October': 'Octubre', 'November': 'Noviembre', 'December': 'Diciembre'
+        }
+
+        fecha_en = current_date.strftime('%A, %B %d, %Y')
+        dia_en = current_date.strftime('%A')
+        mes_en = current_date.strftime('%B')
+        fecha_es = fecha_en.replace(dia_en, dias[dia_en]).replace(mes_en, meses[mes_en])
+
         return f"""
         <div class="header {priority_class}">
-            <h1>{icon} USD/CLP Forecasting System</h1>
-            <div class="date">{current_date.strftime('%A, %B %d, %Y')}</div>
+            <h1>{icon} Sistema de Pronóstico USD/CLP</h1>
+            <div class="date">{fecha_es}</div>
         </div>
         """
 
@@ -349,7 +358,7 @@ class EmailContentBuilder:
         # Add system health
         readiness_class = "status-excellent" if system_health.readiness_score >= 90 else "status-good"
         summary_items.append(
-            f'<li><strong>System Health:</strong> '
+            f'<li><strong>Salud del Sistema:</strong> '
             f'<span class="{readiness_class}">{system_health.readiness_level}</span> '
             f'({system_health.readiness_score:.0f}/100)</li>'
         )
@@ -362,7 +371,7 @@ class EmailContentBuilder:
             )
             summary_items.append(
                 f'<li><strong>Alertas:</strong> '
-                f'<span class="status-warning">{alert_count} issues detected</span></li>'
+                f'<span class="status-warning">{alert_count} problemas detectados</span></li>'
             )
         else:
             summary_items.append(
@@ -384,7 +393,7 @@ class EmailContentBuilder:
         forecast: ForecastData,
         has_pdf: bool,
     ) -> str:
-        """Build collapsible section for a single forecast."""
+        """Build section for a single forecast."""
         bias_class = f"bias-{forecast.bias.lower()}"
 
         # Build metrics grid
@@ -427,7 +436,7 @@ class EmailContentBuilder:
                 <h4>Vista Previa</h4>
                 <img src="data:image/png;base64,{forecast.chart_preview.decode()}"
                      class="chart-preview"
-                     alt="Forecast Chart" />
+                     alt="Gráfico de Pronóstico" />
             </div>
             """
 
@@ -456,8 +465,7 @@ class EmailContentBuilder:
         return f"""
         <div class="section">
             <div class="section-header">
-                <h3>📈 Forecast {forecast.horizon.upper()} - {forecast.bias}</h3>
-                <span>▼</span>
+                <h3>📈 Pronóstico {forecast.horizon.upper()} - {forecast.bias}</h3>
             </div>
             <div class="section-content">
                 {metrics_html}
@@ -507,17 +515,16 @@ class EmailContentBuilder:
         return f"""
         <div class="section">
             <div class="section-header">
-                <h3>🏥 System Health Dashboard</h3>
-                <span>▼</span>
+                <h3>🏥 Salud del Sistema</h3>
             </div>
             <div class="section-content">
                 <div class="forecast-metrics">
                     <div class="metric">
-                        <div class="metric-label">Readiness</div>
+                        <div class="metric-label">Estado</div>
                         <div class="metric-value">{system_health.readiness_level}</div>
                     </div>
                     <div class="metric">
-                        <div class="metric-label">Score</div>
+                        <div class="metric-label">Puntaje</div>
                         <div class="metric-value">{system_health.readiness_score:.0f}/100</div>
                     </div>
                     <div class="metric">
@@ -526,12 +533,12 @@ class EmailContentBuilder:
                     </div>
                 </div>
 
-                <h4>Performance por Horizon</h4>
+                <h4>Rendimiento por Horizonte</h4>
                 <table>
                     <thead>
                         <tr>
-                            <th>Horizon</th>
-                            <th>Status</th>
+                            <th>Horizonte</th>
+                            <th>Estado</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -574,7 +581,6 @@ class EmailContentBuilder:
         <div class="section">
             <div class="section-header">
                 <h3>💡 Recomendaciones</h3>
-                <span>▼</span>
             </div>
             <div class="section-content">
                 <ul>
