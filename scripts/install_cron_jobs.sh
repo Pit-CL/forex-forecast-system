@@ -43,7 +43,8 @@ fi
 # Make scripts executable
 echo "Making scripts executable..."
 chmod +x "${PROJECT_DIR}/scripts/weekly_validation.sh"
-chmod +x "${PROJECT_DIR}/scripts/daily_dashboard.sh" 2>/dev/null || echo -e "${YELLOW}⚠ daily_dashboard.sh not found yet${NC}"
+chmod +x "${PROJECT_DIR}/scripts/send_daily_email.sh" 2>/dev/null || echo -e "${YELLOW}⚠ send_daily_email.sh not found yet${NC}"
+chmod +x "${PROJECT_DIR}/scripts/daily_dashboard.sh" 2>/dev/null || echo -e "${YELLOW}⚠ daily_dashboard.sh (DEPRECATED - use send_daily_email.sh)${NC}"
 
 # Get current crontab
 CURRENT_CRON=$(crontab -l 2>/dev/null || true)
@@ -51,8 +52,8 @@ CURRENT_CRON=$(crontab -l 2>/dev/null || true)
 # Check if jobs already installed
 if echo "${CURRENT_CRON}" | grep -q "${CRON_MARKER}"; then
     echo -e "${YELLOW}Cron jobs already installed. Updating...${NC}"
-    # Remove old entries
-    CURRENT_CRON=$(echo "${CURRENT_CRON}" | grep -v "${CRON_MARKER}" | grep -v "weekly_validation.sh" | grep -v "daily_dashboard.sh")
+    # Remove old entries (including deprecated daily_dashboard.sh)
+    CURRENT_CRON=$(echo "${CURRENT_CRON}" | grep -v "${CRON_MARKER}" | grep -v "weekly_validation.sh" | grep -v "daily_dashboard.sh" | grep -v "send_daily_email.sh")
 fi
 
 # Create new cron entries
@@ -62,11 +63,13 @@ ${CRON_MARKER}
 # Weekly validation - Every Monday at 9:00 AM
 0 9 * * 1 cd ${PROJECT_DIR} && ./scripts/weekly_validation.sh >> ${PROJECT_DIR}/logs/cron.log 2>&1
 
-# Daily dashboard report - Every day at 8:00 AM
-0 8 * * * cd ${PROJECT_DIR} && ./scripts/daily_dashboard.sh >> ${PROJECT_DIR}/logs/cron.log 2>&1
+# Unified daily email - Monday, Wednesday, Thursday, Friday at 7:30 AM (Santiago time)
+30 7 * * 1,3,4,5 cd ${PROJECT_DIR} && ./scripts/send_daily_email.sh >> ${PROJECT_DIR}/logs/cron.log 2>&1
 
 # Performance check - Every day at 10:00 AM
 0 10 * * * cd ${PROJECT_DIR} && python scripts/check_performance.py --all >> ${PROJECT_DIR}/logs/cron.log 2>&1
+
+# DEPRECATED: daily_dashboard.sh replaced by send_daily_email.sh (unified email system)
 "
 
 # Install new crontab
@@ -77,7 +80,7 @@ echo -e "${GREEN}✓ Cron jobs installed successfully!${NC}"
 echo ""
 echo "Installed jobs:"
 echo "  • Weekly Validation:     Mondays at 9:00 AM"
-echo "  • Daily Dashboard:       Daily at 8:00 AM"
+echo "  • Unified Daily Email:   Mon, Wed, Thu, Fri at 7:30 AM"
 echo "  • Performance Check:     Daily at 10:00 AM"
 echo ""
 echo "Logs will be written to: ${PROJECT_DIR}/logs/cron.log"
