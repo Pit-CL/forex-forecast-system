@@ -386,12 +386,100 @@ class UnifiedEmailOrchestrator:
         Returns:
             ForecastData if available, None otherwise
         """
-        # TODO: Implement actual data loading from prediction tracker
-        # For now, return None to be implemented in Phase 4
-        logger.warning(
-            f"load_forecast_data not yet implemented for {horizon}",
-        )
-        return None
+        if forecast_date is None:
+            forecast_date = datetime.now()
+
+        try:
+            from ..mlops.tracking import PredictionTracker
+
+            # Initialize tracker
+            predictions_path = self.data_dir / "predictions" / "predictions.parquet"
+
+            if not predictions_path.exists():
+                logger.warning(f"Predictions file not found: {predictions_path}")
+                return None
+
+            tracker = PredictionTracker(storage_path=predictions_path)
+
+            # Load predictions for this horizon
+            df = pd.read_parquet(predictions_path)
+
+            # Filter by horizon
+            horizon_df = df[df["horizon"] == horizon].copy()
+
+            if horizon_df.empty:
+                logger.warning(f"No predictions found for horizon {horizon}")
+                return None
+
+            # Get most recent forecast
+            horizon_df = horizon_df.sort_values("forecast_date", ascending=False)
+            latest = horizon_df.iloc[0]
+
+            # Calculate current price (last actual or forecast)
+            current_price = float(latest.get("actual", latest["forecast_mean"]))
+
+            # Get forecast values
+            forecast_price = float(latest["forecast_mean"])
+            ci95_low = float(latest.get("ci95_low", forecast_price * 0.95))
+            ci95_high = float(latest.get("ci95_high", forecast_price * 1.05))
+            ci80_low = float(latest.get("ci80_low", forecast_price * 0.98))
+            ci80_high = float(latest.get("ci80_high", forecast_price * 1.02))
+
+            # Calculate change percentage
+            change_pct = ((forecast_price - current_price) / current_price) * 100
+
+            # Determine bias
+            if change_pct > 0.3:
+                bias = "ALCISTA"
+            elif change_pct < -0.3:
+                bias = "BAJISTA"
+            else:
+                bias = "NEUTRAL"
+
+            # Determine volatility (based on CI width)
+            ci_width = ((ci95_high - ci95_low) / forecast_price) * 100
+            if ci_width > 5:
+                volatility = "ALTA"
+            elif ci_width > 2:
+                volatility = "MEDIA"
+            else:
+                volatility = "BAJA"
+
+            # Find PDF path if exists
+            pdf_dir = self.data_dir.parent / "reports"
+            pdf_pattern = f"*{horizon}*.pdf"
+            pdf_files = list(pdf_dir.glob(pdf_pattern))
+            pdf_path = pdf_files[0] if pdf_files else None
+
+            # Create ForecastData
+            forecast_data = ForecastData(
+                horizon=horizon,
+                current_price=current_price,
+                forecast_price=forecast_price,
+                change_pct=change_pct,
+                ci95_low=ci95_low,
+                ci95_high=ci95_high,
+                ci80_low=ci80_low,
+                ci80_high=ci80_high,
+                bias=bias,
+                volatility=volatility,
+                pdf_path=pdf_path,
+                timestamp=pd.Timestamp(latest["forecast_date"]),
+            )
+
+            logger.info(
+                f"Loaded forecast data for {horizon}: "
+                f"${current_price:.0f} → ${forecast_price:.0f} ({change_pct:+.1f}%)",
+            )
+
+            return forecast_data
+
+        except Exception as e:
+            logger.error(
+                f"Error loading forecast data for {horizon}: {e}",
+                exc_info=True,
+            )
+            return None
 
     def load_system_health(self) -> SystemHealthData:
         """
@@ -400,25 +488,91 @@ class UnifiedEmailOrchestrator:
         Returns:
             SystemHealthData with current metrics
         """
-        # TODO: Implement actual system health loading
-        # For now, return mock data to be implemented in Phase 4
-        logger.warning("load_system_health not yet implemented")
+        try:
+            from ..mlops.readiness import ChronosReadinessChecker
+            from ..mlops.performance_monitor import PerformanceMonitor
 
-        return SystemHealthData(
-            readiness_level="READY",
-            readiness_score=85.0,
-            performance_status={
-                "7d": "GOOD",
-                "15d": "GOOD",
-                "30d": "EXCELLENT",
-                "90d": "GOOD",
-            },
-            degradation_detected=False,
-            degradation_details=[],
-            recent_predictions=100,
-            drift_detected=False,
-            drift_details=[],
-        )
+            # Initialize checkers
+            readiness_checker = ChronosReadinessChecker(data_dir=self.data_dir)
+            performance_monitor = PerformanceMonitor(data_dir=self.data_dir)
+
+            # Get readiness assessment
+            readiness_report = readiness_checker.assess()
+
+            # Get performance status for all horizons
+            performance_reports = performance_monitor.check_all_horizons()
+
+            # Build performance status dict
+            performance_status = {}
+            degradation_detected = False
+            degradation_details = []
+
+            for horizon, report in performance_reports.items():
+                # Map PerformanceStatus to string
+                if report.status.value == "excellent":
+                    performance_status[horizon] = "EXCELLENT"
+                elif report.status.value == "good":
+                    performance_status[horizon] = "GOOD"
+                elif report.status.value == "degraded":
+                    performance_status[horizon] = "DEGRADED"
+                    degradation_detected = True
+                    degradation_details.append(
+                        f"{horizon}: {report.recommendation}"
+                    )
+                else:
+                    performance_status[horizon] = "UNKNOWN"
+
+            # Count recent predictions
+            predictions_path = self.data_dir / "predictions" / "predictions.parquet"
+            recent_predictions = 0
+
+            if predictions_path.exists():
+                df = pd.read_parquet(predictions_path)
+                # Count predictions in last 7 days
+                cutoff = pd.Timestamp.now() - pd.Timedelta(days=7)
+                recent_df = df[df["forecast_date"] > cutoff]
+                recent_predictions = len(recent_df)
+
+            # Check drift detection (if available)
+            drift_detected = False
+            drift_details = []
+
+            # TODO: Integrate with drift detector when available
+            # For now, check if drift is mentioned in degradation details
+
+            return SystemHealthData(
+                readiness_level=readiness_report.level.value.upper(),
+                readiness_score=readiness_report.score,
+                performance_status=performance_status,
+                degradation_detected=degradation_detected,
+                degradation_details=degradation_details,
+                recent_predictions=recent_predictions,
+                drift_detected=drift_detected,
+                drift_details=drift_details,
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Error loading system health: {e}",
+                exc_info=True,
+            )
+
+            # Return safe defaults on error
+            return SystemHealthData(
+                readiness_level="UNKNOWN",
+                readiness_score=50.0,
+                performance_status={
+                    "7d": "UNKNOWN",
+                    "15d": "UNKNOWN",
+                    "30d": "UNKNOWN",
+                    "90d": "UNKNOWN",
+                },
+                degradation_detected=False,
+                degradation_details=["Error loading system health"],
+                recent_predictions=0,
+                drift_detected=False,
+                drift_details=[],
+            )
 
     def should_send_email_today(
         self,

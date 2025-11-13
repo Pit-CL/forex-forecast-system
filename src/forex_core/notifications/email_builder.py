@@ -45,6 +45,12 @@ class EmailContentBuilder:
     - Inline chart previews
     """
 
+    # Institutional colors
+    COLOR_PRIMARY = "#004f71"  # Azul institucional
+    COLOR_SECONDARY = "#d8e5ed"  # Gris claro
+    COLOR_PRIMARY_DARK = "#003a54"  # Azul oscuro (variant)
+    COLOR_PRIMARY_LIGHT = "#0066a1"  # Azul claro (variant)
+
     # CSS for responsive email (inline styles for email client compatibility)
     EMAIL_CSS = """
     <style>
@@ -57,7 +63,7 @@ class EmailContentBuilder:
             color: #333;
         }
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #004f71 0%, #003a54 100%);
             color: white;
             padding: 30px;
             border-radius: 10px;
@@ -80,7 +86,7 @@ class EmailContentBuilder:
         }
         .executive-summary {
             background: white;
-            border-left: 4px solid #667eea;
+            border-left: 4px solid #004f71;
             padding: 20px;
             margin-bottom: 20px;
             border-radius: 8px;
@@ -88,7 +94,7 @@ class EmailContentBuilder:
         }
         .executive-summary h2 {
             margin-top: 0;
-            color: #667eea;
+            color: #004f71;
             font-size: 18px;
         }
         .executive-summary ul {
@@ -179,7 +185,7 @@ class EmailContentBuilder:
         .pdf-attachment {
             display: inline-block;
             padding: 10px 20px;
-            background: #667eea;
+            background: #004f71;
             color: white;
             text-decoration: none;
             border-radius: 6px;
