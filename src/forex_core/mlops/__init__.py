@@ -44,4 +44,34 @@ try:
 except ImportError:
     pass
 
+try:
+    from .drift_trends import (
+        DriftTrendAnalyzer,
+        DriftTrendReport,
+        DriftTrend,
+    )
+    _all_exports.extend([
+        "DriftTrendAnalyzer",
+        "DriftTrendReport",
+        "DriftTrend",
+    ])
+except ImportError:
+    pass
+
+try:
+    from .validation import (
+        WalkForwardValidator,
+        ValidationReport,
+        ValidationMetrics,
+        ValidationMode,
+    )
+    _all_exports.extend([
+        "WalkForwardValidator",
+        "ValidationReport",
+        "ValidationMetrics",
+        "ValidationMode",
+    ])
+except ImportError:
+    pass
+
 __all__ = _all_exports

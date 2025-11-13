@@ -54,6 +54,11 @@ class DriftTestResult:
     drift_detected: bool
     description: str
 
+    @property
+    def is_significant(self) -> bool:
+        """Check if this test detected significant drift."""
+        return self.drift_detected
+
 
 @dataclass
 class DriftReport:
@@ -89,6 +94,18 @@ class DriftReport:
     tests: Dict[str, DriftTestResult]
     recommendation: str
     timestamp: datetime
+
+    def has_significant_drift(self) -> bool:
+        """
+        Check if there is significant drift requiring attention.
+
+        Returns:
+            True if drift detected with MEDIUM or HIGH severity.
+        """
+        return self.drift_detected and self.severity in [
+            DriftSeverity.MEDIUM,
+            DriftSeverity.HIGH,
+        ]
 
 
 class DataDriftDetector:
