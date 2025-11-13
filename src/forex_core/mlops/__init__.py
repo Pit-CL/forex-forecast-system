@@ -6,6 +6,7 @@ This package provides tools for production ML operations:
 - Model performance monitoring
 - Statistical tests for distribution changes
 - Prediction tracking and out-of-sample evaluation
+- System readiness validation for feature rollout
 """
 
 from .monitoring import (
@@ -15,21 +16,32 @@ from .monitoring import (
     DriftTestResult,
 )
 
-# Try to import PredictionTracker, but don't fail if dependencies not available
+# Try to import optional components
+_all_exports = [
+    "DataDriftDetector",
+    "DriftReport",
+    "DriftSeverity",
+    "DriftTestResult",
+]
+
 try:
     from .tracking import PredictionTracker
-    __all__ = [
-        "DataDriftDetector",
-        "DriftReport",
-        "DriftSeverity",
-        "DriftTestResult",
-        "PredictionTracker",
-    ]
-except ImportError as e:
-    # PredictionTracker not available, but core drift detection still works
-    __all__ = [
-        "DataDriftDetector",
-        "DriftReport",
-        "DriftSeverity",
-        "DriftTestResult",
-    ]
+    _all_exports.append("PredictionTracker")
+except ImportError:
+    pass
+
+try:
+    from .readiness import (
+        ChronosReadinessChecker,
+        ReadinessReport,
+        ReadinessLevel,
+    )
+    _all_exports.extend([
+        "ChronosReadinessChecker",
+        "ReadinessReport",
+        "ReadinessLevel",
+    ])
+except ImportError:
+    pass
+
+__all__ = _all_exports
