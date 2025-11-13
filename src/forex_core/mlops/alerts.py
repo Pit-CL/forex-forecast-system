@@ -14,7 +14,8 @@ from typing import Optional
 
 from loguru import logger
 
-from forex_core.data.models import DataBundle, ForecastPackage
+from forex_core.data.loader import DataBundle
+from forex_core.data.models import ForecastPackage
 from forex_core.mlops.event_detector import (
     DetectedEvent,
     EventDetector,

@@ -20,7 +20,8 @@ from typing import Optional
 import pandas as pd
 from loguru import logger
 
-from forex_core.data.models import DataBundle, ForecastPackage
+from forex_core.data.loader import DataBundle
+from forex_core.data.models import ForecastPackage
 from forex_core.mlops.monitoring import DataDriftDetector, DriftReport
 from forex_core.mlops.tracking import PredictionTracker
 
