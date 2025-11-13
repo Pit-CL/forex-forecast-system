@@ -24,7 +24,7 @@ echo "=========================================="
 echo ""
 
 # Run readiness check
-if python3 scripts/check_chronos_readiness.py --data-dir data; then
+if python3 scripts/check_chronos_readiness.py check --data-dir data; then
     READINESS_STATUS="READY"
     EXIT_CODE=0
 elif [ $? -eq 2 ]; then
