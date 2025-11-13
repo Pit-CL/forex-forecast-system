@@ -74,7 +74,9 @@ class AlertManager:
             volatility_threshold: Multiplicador de vol para alertar
         """
         self.data_dir = data_dir
-        self.tracker = PredictionTracker(data_dir=data_dir)
+        # PredictionTracker uses storage_path, not data_dir
+        # It will automatically use data_dir from settings if no path is provided
+        self.tracker = PredictionTracker()
         self.drift_detector = DataDriftDetector()
         self.event_detector = EventDetector(
             tracker=self.tracker,
