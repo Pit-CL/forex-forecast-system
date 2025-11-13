@@ -106,7 +106,7 @@ def run_forecast_pipeline(
         # Step 5: Send email (optional)
         if not skip_email:
             logger.info("Sending email notification...")
-            _send_email(settings, report_path)
+            _send_email(settings, report_path, bundle, forecast, service_config)
             logger.success("Email sent successfully")
         else:
             logger.info("Email delivery skipped")
@@ -180,22 +180,32 @@ def _build_report(
     )
 
 
-def _send_email(settings, report_path: Path) -> None:
+def _send_email(
+    settings,
+    report_path: Path,
+    bundle: DataBundle,
+    forecast: ForecastPackage,
+    service_config,
+) -> None:
     """
-    Send email notification with report attached.
+    Send email notification with report attached, including executive summary.
 
-    NOTE: Email sending is not yet implemented in forex_core.
-    This is a placeholder for when EmailSender is available.
+    Args:
+        settings: System settings with email configuration
+        report_path: Path to generated PDF report
+        bundle: DataBundle with market data
+        forecast: ForecastPackage with forecast results
+        service_config: Service configuration with horizon info
     """
-    logger.warning("Email sending not yet implemented - placeholder")
-    # TODO: Implement when forex_core.notifications.EmailSender is ready
-    # from forex_core.notifications import EmailSender
-    # sender = EmailSender(settings)
-    # sender.send(
-    #     subject=f"Proyección USD/CLP 7 días - {datetime.now():%Y-%m-%d}",
-    #     body="Se adjunta la proyección de tipo de cambio para los próximos 7 días.",
-    #     attachment_path=report_path
-    # )
+    from forex_core.notifications.email import EmailSender
+
+    sender = EmailSender(settings)
+    sender.send(
+        report_path=report_path,
+        bundle=bundle,
+        forecast=forecast.result,
+        horizon=service_config.horizon_code,
+    )
 
 
 def validate_forecast(bundle: DataBundle, forecast: ForecastPackage) -> bool:

@@ -23,10 +23,21 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import List, Sequence
 
+import pandas as pd
+
 from ..config.base import Settings
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Horizon label mapping for Spanish display
+HORIZON_LABELS = {
+    "7d": "Semanal (7 días)",
+    "15d": "Quincenal (15 días)",
+    "30d": "Mensual (30 días)",
+    "90d": "Trimestral (90 días)",
+    "12m": "Anual (12 meses)",
+}
 
 
 class EmailSender:
@@ -77,12 +88,87 @@ class EmailSender:
             extra={"gmail_user": self.gmail_user},
         )
 
+    def _generate_executive_summary(
+        self,
+        bundle,
+        forecast,
+        horizon: str,
+    ) -> str:
+        """Generate executive summary with forecast highlights and actions."""
+        from ..data.loader import DataBundle
+        from ..data.models import ForecastResult
+
+        # Current price
+        current_price = bundle.usdclp_series.iloc[-1]
+
+        # Forecast endpoint
+        fc_last = forecast.series[-1]
+        fc_mean = fc_last.mean
+        fc_change_pct = ((fc_mean / current_price) - 1) * 100
+
+        # IC 80% range
+        ic80_low = fc_last.ci80_low
+        ic80_high = fc_last.ci80_high
+
+        # Determine directional bias
+        if fc_change_pct > 0.3:
+            bias = "ALCISTA"
+            bias_emoji = "📈"
+        elif fc_change_pct < -0.3:
+            bias = "BAJISTA"
+            bias_emoji = "📉"
+        else:
+            bias = "NEUTRAL"
+            bias_emoji = "➡️"
+
+        # Horizon-specific actions
+        horizon_label = HORIZON_LABELS.get(horizon, horizon)
+
+        if bias == "ALCISTA":
+            action_importers = "Cubrir 30-50% exposición en retrocesos"
+            action_exporters = "Esperar niveles superiores para vender USD"
+            action_traders = "Long USD/CLP en pullbacks, target IC80 superior"
+        elif bias == "BAJISTA":
+            action_importers = "Aguardar descensos, no apresurarse en coberturas"
+            action_exporters = "Asegurar niveles actuales, cubrir 40-60% exposición"
+            action_traders = "Short USD/CLP en rebotes, target IC80 inferior"
+        else:
+            action_importers = "Coberturas escalonadas 20-30-30-20%"
+            action_exporters = "Estrategia neutral, vender en extremos de rango"
+            action_traders = "Range-bound trading, vender volatilidad"
+
+        summary = f"""
+=== RESUMEN EJECUTIVO ===
+
+Período analizado: {horizon_label}
+Sesgo direccional: {bias} {bias_emoji}
+Precio actual: {current_price:.2f} CLP
+Precio proyectado: {fc_mean:.2f} CLP ({fc_change_pct:+.2f}%)
+Rango proyectado (IC 80%): {ic80_low:.2f} - {ic80_high:.2f} CLP
+
+ACCIONES RECOMENDADAS:
+• [Importadores]: {action_importers}
+• [Exportadores]: {action_exporters}
+• [Traders]: {action_traders}
+
+=== INFORME COMPLETO ===
+Ver archivo adjunto PDF para análisis detallado con gráficos y proyecciones.
+
+---
+Sistema Automático de Pronóstico USD/CLP
+Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')} (Chile)
+"""
+        return summary
+
     def send(
         self,
         report_path: Path,
-        subject: Optional[str] = None,
-        body: Optional[str] = None,
+        subject: str | None = None,
+        body: str | None = None,
         additional_attachments: Sequence[Path] = None,
+        bundle = None,
+        forecast = None,
+        horizon: str = "7d",
     ) -> None:
         """
         Send email with PDF report attachment.
@@ -92,6 +178,9 @@ class EmailSender:
             subject: Email subject line (auto-generated if None)
             body: Email body text (auto-generated if None)
             additional_attachments: Optional additional files to attach
+            bundle: DataBundle for generating executive summary
+            forecast: ForecastResult for generating executive summary
+            horizon: Forecast horizon code (e.g., "7d", "15d")
 
         Raises:
             smtplib.SMTPException: If email sending fails
@@ -100,13 +189,32 @@ class EmailSender:
         if not report_path.exists():
             raise FileNotFoundError(f"Report file not found: {report_path}")
 
-        # Auto-generate subject if not provided
+        # Generate subject with date and bias if bundle/forecast provided
         if subject is None:
-            subject = self._generate_subject(report_path)
+            if bundle is not None and forecast is not None:
+                current_price = bundle.usdclp_series.iloc[-1]
+                fc_last = forecast.series[-1]
+                fc_change_pct = ((fc_last.mean / current_price) - 1) * 100
 
-        # Auto-generate body if not provided
+                if fc_change_pct > 0.3:
+                    bias_label = "ALCISTA 📈"
+                elif fc_change_pct < -0.3:
+                    bias_label = "BAJISTA 📉"
+                else:
+                    bias_label = "NEUTRAL ➡️"
+
+                date_str = pd.Timestamp.now().strftime('%Y-%m-%d')
+                horizon_label = HORIZON_LABELS.get(horizon, horizon)
+                subject = f"[USD/CLP] Proyección {horizon_label} - {date_str} - {bias_label}"
+            else:
+                subject = self._generate_subject(report_path)
+
+        # Generate body with executive summary if bundle/forecast provided
         if body is None:
-            body = self._generate_body(report_path)
+            if bundle is not None and forecast is not None:
+                body = self._generate_executive_summary(bundle, forecast, horizon)
+            else:
+                body = self._generate_body(report_path)
 
         # Build attachments list
         attachments = [report_path]

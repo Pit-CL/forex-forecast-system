@@ -31,6 +31,40 @@ from ..data.loader import DataBundle
 matplotlib.use("Agg")
 
 
+# Horizon-specific lookback periods for charts
+CHART_HIST_LOOKBACK = {
+    "7d": 30,
+    "15d": 60,
+    "30d": 90,
+    "90d": 180,
+    "12m": 365,
+}
+
+CHART_TECH_LOOKBACK = {
+    "7d": 60,
+    "15d": 90,
+    "30d": 120,
+    "90d": 240,
+    "12m": 365,
+}
+
+CHART_MACRO_LOOKBACK = {
+    "7d": 90,
+    "15d": 120,
+    "30d": 180,
+    "90d": 365,
+    "12m": 730,
+}
+
+CHART_REGIME_LOOKBACK = {
+    "7d": 30,
+    "15d": 45,
+    "30d": 60,
+    "90d": 90,
+    "12m": 180,
+}
+
+
 class ChartGenerator:
     """
     Generates charts for forex forecasting reports.
@@ -145,8 +179,8 @@ class ChartGenerator:
         Returns:
             Path to saved chart file
         """
-        # Get last 30 days of historical data
-        hist = bundle.usdclp_series.tail(30)
+        # Get historical data based on horizon
+        hist = bundle.usdclp_series.tail(CHART_HIST_LOOKBACK.get(horizon, 30))
 
         # Build forecast DataFrame
         fc_df = pd.DataFrame(
@@ -163,8 +197,9 @@ class ChartGenerator:
         # Create figure
         fig, ax = plt.subplots(figsize=(10, 5))
 
-        # Plot historical data (full 30 days for context)
-        ax.plot(hist.index, hist.values, label="Histórico 30d", color="#1f77b4", linewidth=2)
+        # Plot historical data (context based on horizon)
+        lookback_days = CHART_HIST_LOOKBACK.get(horizon, 30)
+        ax.plot(hist.index, hist.values, label=f"Histórico {lookback_days}d", color="#1f77b4", linewidth=2)
 
         # Plot forecast mean
         ax.plot(fc_df.index, fc_df["mean"].values, label="Proyección media", color="#d62728", linewidth=2.5)
@@ -385,7 +420,7 @@ class ChartGenerator:
 
         # Compute technical indicators
         technicals = compute_technicals(bundle.usdclp_series)
-        frame = technicals["frame"].tail(60)  # Last 60 periods
+        frame = technicals["frame"].tail(CHART_TECH_LOOKBACK.get(horizon, 60))
 
         # Create figure with 3 subplots
         fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
@@ -403,7 +438,8 @@ class ChartGenerator:
             label="Bollinger Bands (±2σ)",
         )
         ax1.set_ylabel("CLP por USD", fontsize=11)
-        ax1.set_title("Análisis Técnico USD/CLP (60 días)", fontsize=13, fontweight="bold")
+        lookback_days = CHART_TECH_LOOKBACK.get(horizon, 60)
+        ax1.set_title(f"Análisis Técnico USD/CLP ({lookback_days} días)", fontsize=13, fontweight="bold")
         ax1.legend(loc="best", fontsize=9)
         ax1.grid(True, alpha=0.3)
 
@@ -590,8 +626,8 @@ class ChartGenerator:
         # Create figure with 2x2 subplots
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
-        # Get last 90 days
-        lookback = 90
+        # Get lookback period based on horizon
+        lookback = CHART_MACRO_LOOKBACK.get(horizon, 90)
 
         # Subplot 1: USD/CLP vs Copper
         ax1 = axes[0, 0]
@@ -716,8 +752,8 @@ class ChartGenerator:
         # Create visualization
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 
-        # Get recent data (30 days)
-        lookback = 30
+        # Get lookback period based on horizon
+        lookback = CHART_REGIME_LOOKBACK.get(horizon, 30)
         dxy_recent = bundle.dxy_series.tail(lookback)
         vix_recent = bundle.vix_series.tail(lookback)
         eem_recent = bundle.eem_series.tail(lookback)
