@@ -91,7 +91,7 @@ test_normal_scenario() {
     log_info "Testing with current system data..."
     log_info "Expected: HTML email with forecast data, minimal PDFs"
 
-    PYTHONPATH=src:$PYTHONPATH python -c "
+    PYTHONPATH=src:${PYTHONPATH:-} python -c "
 import sys
 sys.path.insert(0, 'src')
 from pathlib import Path
@@ -214,7 +214,7 @@ test_html_rendering() {
 
     log_info "Testing HTML generation with institutional colors..."
 
-    PYTHONPATH=src:$PYTHONPATH python -c "
+    PYTHONPATH=src:${PYTHONPATH:-} python -c "
 import sys
 sys.path.insert(0, 'src')
 from pathlib import Path
