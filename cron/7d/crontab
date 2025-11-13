@@ -1,0 +1,6 @@
+# USD/CLP 7-Day Forecast - Daily at 8:00 AM Chile time
+0 8 * * * cd /app && python -m services.forecaster_7d.cli run >> /var/log/cron.log 2>&1
+
+# Health check - write timestamp every hour
+0 * * * * date > /tmp/healthcheck
+
