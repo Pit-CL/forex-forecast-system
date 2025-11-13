@@ -263,10 +263,18 @@ class ChronosReadinessChecker:
 
             # Get first prediction date
             first_pred = df["forecast_date"].min()
-            days_operating = (datetime.now() - pd.Timestamp(first_pred)).days
+
+            # Ensure both timestamps are timezone-naive for comparison
+            # first_pred is already a pd.Timestamp
+            if hasattr(first_pred, 'tz') and first_pred.tz is not None:
+                first_pred = first_pred.tz_localize(None)
+
+            # Calculate days operating (use pd.Timestamp.now() to ensure consistency)
+            now = pd.Timestamp.now()
+            days_operating = (now - first_pred).days
 
             passed = days_operating >= self.min_days_operating
-            score = min(100, (days_operating / self.min_days_operating) * 100)
+            score = min(100.0, (days_operating / self.min_days_operating) * 100.0)
 
             message = (
                 f"System operating for {days_operating} days "

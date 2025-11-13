@@ -74,4 +74,38 @@ try:
 except ImportError:
     pass
 
+try:
+    from .regime_detector import (
+        MarketRegimeDetector,
+        MarketRegime,
+        RegimeReport,
+        RegimeSignals,
+    )
+    _all_exports.extend([
+        "MarketRegimeDetector",
+        "MarketRegime",
+        "RegimeReport",
+        "RegimeSignals",
+    ])
+except ImportError:
+    pass
+
+try:
+    from .performance_monitor import (
+        PerformanceMonitor,
+        DegradationReport,
+        PerformanceStatus,
+        PerformanceMetrics,
+        PerformanceBaseline,
+    )
+    _all_exports.extend([
+        "PerformanceMonitor",
+        "DegradationReport",
+        "PerformanceStatus",
+        "PerformanceMetrics",
+        "PerformanceBaseline",
+    ])
+except ImportError:
+    pass
+
 __all__ = _all_exports

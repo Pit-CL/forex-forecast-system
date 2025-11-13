@@ -41,6 +41,7 @@ def create_simple_forecaster(horizon_days: int):
     def forecaster_func(bundle, horizon):
         """Simple naive forecaster for testing."""
         from forex_core.data.models import ForecastPackage, ForecastPoint
+        from scipy import stats
 
         import numpy as np
 
@@ -51,13 +52,29 @@ def create_simple_forecaster(horizon_days: int):
         recent_values = bundle.usdclp_series.tail(30).values
         drift = (recent_values[-1] - recent_values[0]) / len(recent_values)
 
+        # Estimate volatility from historical data (more realistic)
+        # Use log returns for volatility estimation
+        log_returns = np.log(recent_values[1:] / recent_values[:-1])
+        historical_vol = np.std(log_returns, ddof=1)  # Sample std dev
+
+        # t-distribution critical values (df=30)
+        df = 30
+        t_80 = stats.t.ppf(0.90, df=df)  # ≈1.310
+        t_95 = stats.t.ppf(0.975, df=df)  # ≈2.042
+
         # Generate naive forecast
         forecast_points = []
         for i in range(horizon):
             mean = last_value + drift * (i + 1)
-            std_dev = mean * 0.01  # Assume 1% std dev
-            ci80_width = std_dev * 1.28  # 80% CI (±1.28σ)
-            ci95_width = std_dev * 1.96  # 95% CI (±1.96σ)
+
+            # Forecast std dev grows with horizon (sqrt(h) rule)
+            # Convert log-return volatility to price volatility
+            # std_price ≈ price * vol_log * sqrt(horizon_days)
+            horizon_days = i + 1
+            std_dev = mean * historical_vol * np.sqrt(horizon_days)
+
+            ci80_width = std_dev * t_80  # 80% CI using t-distribution
+            ci95_width = std_dev * t_95  # 95% CI using t-distribution
 
             point = ForecastPoint(
                 date=datetime.now() + timedelta(days=i + 1),
@@ -72,9 +89,9 @@ def create_simple_forecaster(horizon_days: int):
 
         return ForecastPackage(
             series=forecast_points,
-            methodology="Naive drift forecaster (recent 30-day trend)",
+            methodology="Naive drift forecaster (30d trend + historical vol, t-dist CIs)",
             error_metrics={"rmse": 0.0, "mae": 0.0, "mape": 0.0},  # Placeholder
-            residual_vol=last_value * 0.01,  # Assume 1% volatility
+            residual_vol=last_value * historical_vol,
         )
 
     return forecaster_func

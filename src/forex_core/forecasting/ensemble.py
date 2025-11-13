@@ -161,7 +161,7 @@ def combine_forecasts(
     This function:
     1. Takes weighted average of point forecasts (mean)
     2. Takes weighted average of standard deviations
-    3. Reconstructs confidence intervals from ensemble std dev
+    3. Reconstructs confidence intervals from ensemble std dev using t-distribution
     4. Creates methodology string describing ensemble composition
 
     Args:
@@ -180,16 +180,17 @@ def combine_forecasts(
     Notes:
         - Assumes all models have same forecast horizon
         - Assumes all models have same date index
-        - Confidence intervals use normal distribution assumption
+        - Confidence intervals use t-distribution (df=30) for proper coverage
         - Alternative: Bootstrap ensemble distributions for non-normality
 
     Confidence interval formulas:
-        CI_80: mean +/- 1.2816 * std_dev
-        CI_95: mean +/- 1.96 * std_dev
+        CI_80: mean +/- t(0.90, df=30) * std_dev
+        CI_95: mean +/- t(0.975, df=30) * std_dev
 
-    Where:
-        - 1.2816 = z-score for 80% CI (90th percentile)
-        - 1.96 = z-score for 95% CI (97.5th percentile)
+    Where t-distribution accounts for:
+        - Parameter estimation uncertainty
+        - Non-normality in forex returns (fatter tails)
+        - Small sample effects
 
     Theoretical justification:
         - Weighted mean is minimum variance unbiased estimator (MVUE)
@@ -204,8 +205,15 @@ def combine_forecasts(
         - Simple linear combination (nonlinear combinations possible)
         - No accounting for model correlation in uncertainty quantification
     """
+    from scipy import stats
+
     names = list(results.keys())
     base_series = results[names[0]].package.series
+
+    # t-distribution critical values (df=30)
+    df = 30
+    t_80 = stats.t.ppf(0.90, df=df)  # ≈1.310
+    t_95 = stats.t.ppf(0.975, df=df)  # ≈2.042
 
     combined_points: List[ForecastPoint] = []
 
@@ -225,14 +233,13 @@ def combine_forecasts(
             for name in names
         )
 
-        # Reconstruct confidence intervals
-        # 80% CI: +/- 1.2816 std (z-score for 90th percentile)
-        ci80_low = mean - 1.2816 * std
-        ci80_high = mean + 1.2816 * std
+        # Reconstruct confidence intervals using t-distribution
+        # More conservative than normal, accounts for estimation uncertainty
+        ci80_low = mean - t_80 * std
+        ci80_high = mean + t_80 * std
 
-        # 95% CI: +/- 1.96 std (z-score for 97.5th percentile)
-        ci95_low = mean - 1.96 * std
-        ci95_high = mean + 1.96 * std
+        ci95_low = mean - t_95 * std
+        ci95_high = mean + t_95 * std
 
         combined_points.append(
             ForecastPoint(

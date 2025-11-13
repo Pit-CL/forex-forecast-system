@@ -20,6 +20,7 @@ from loguru import logger
 from scipy import stats
 
 from forex_core.mlops.monitoring import DataDriftDetector, DriftReport, DriftSeverity
+from forex_core.utils.file_lock import ParquetFileLock
 
 
 class DriftTrend(str, Enum):
@@ -142,8 +143,9 @@ class DriftTrendAnalyzer:
         else:
             df = pd.DataFrame([record])
 
-        # Save updated history
-        df.to_parquet(self.storage_path, index=False)
+        # Save updated history (with file lock for process safety)
+        with ParquetFileLock(self.storage_path, timeout=30.0):
+            df.to_parquet(self.storage_path, index=False)
 
         logger.info(
             f"Drift recorded for {horizon}: score={drift_score:.1f}, "

@@ -232,6 +232,15 @@ def drift(
     - Recommendations
     """
     from forex_core.mlops.dashboard_utils import get_drift_details, plot_drift_trend
+    from forex_core.utils.validators import validate_horizon, validate_positive_integer, ValidationError
+
+    # Validate inputs
+    try:
+        horizon = validate_horizon(horizon)
+        days = validate_positive_integer(days, min_value=1, max_value=365, param_name="days")
+    except ValidationError as e:
+        console.print(f"[red]✗ Input validation error: {e}[/red]")
+        raise typer.Exit(1)
 
     console.print(f"\n[bold cyan]Drift Analysis - {horizon}[/bold cyan]\n")
 
@@ -312,6 +321,15 @@ def validation(
     - Performance trends
     """
     from forex_core.mlops.dashboard_utils import get_validation_details
+    from forex_core.utils.validators import validate_horizon, validate_positive_integer, ValidationError
+
+    # Validate inputs
+    try:
+        horizon = validate_horizon(horizon)
+        limit = validate_positive_integer(limit, min_value=1, max_value=100, param_name="limit")
+    except ValidationError as e:
+        console.print(f"[red]✗ Input validation error: {e}[/red]")
+        raise typer.Exit(1)
 
     console.print(f"\n[bold cyan]Validation Results - {horizon}[/bold cyan]\n")
 
@@ -361,6 +379,16 @@ def alerts(
     - Event types triggering alerts
     """
     from forex_core.mlops.dashboard_utils import get_alert_details
+    from forex_core.utils.validators import validate_horizon, validate_severity, validate_positive_integer, ValidationError
+
+    # Validate inputs
+    try:
+        horizon = validate_horizon(horizon, allow_none=True)
+        days = validate_positive_integer(days, min_value=1, max_value=365, param_name="days")
+        severity = validate_severity(severity, allow_none=True)
+    except ValidationError as e:
+        console.print(f"[red]✗ Input validation error: {e}[/red]")
+        raise typer.Exit(1)
 
     title = "Alert History"
     if horizon:

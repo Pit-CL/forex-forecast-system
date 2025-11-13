@@ -50,6 +50,7 @@ from loguru import logger
 
 from forex_core.config import get_settings
 from forex_core.data import DataLoader
+from forex_core.utils.file_lock import ParquetFileLock
 
 
 class PredictionTracker:
@@ -207,41 +208,48 @@ class PredictionTracker:
             "updated_at": now,
         }])
 
-        # Thread-safe append
+        # Process-safe append using file lock
+        # Note: self.lock is kept for backward compatibility but ParquetFileLock
+        # provides true multi-process safety
         with self.lock:
             try:
-                # Read existing data
-                if self.storage_path.exists() and self.storage_path.stat().st_size > 0:
-                    existing_df = pd.read_parquet(self.storage_path)
+                # Acquire file lock for multi-process safety
+                with ParquetFileLock(self.storage_path, timeout=30.0):
+                    # Read existing data
+                    if self.storage_path.exists() and self.storage_path.stat().st_size > 0:
+                        existing_df = pd.read_parquet(self.storage_path)
 
-                    # Check for duplicate prediction
-                    duplicate_mask = (
-                        (existing_df["forecast_date"] == forecast_date) &
-                        (existing_df["horizon"] == horizon) &
-                        (existing_df["target_date"] == target_date)
+                        # Check for duplicate prediction
+                        duplicate_mask = (
+                            (existing_df["forecast_date"] == forecast_date) &
+                            (existing_df["horizon"] == horizon) &
+                            (existing_df["target_date"] == target_date)
+                        )
+
+                        if duplicate_mask.any():
+                            logger.warning(
+                                f"Duplicate prediction exists for forecast_date={forecast_date}, "
+                                f"horizon={horizon}, target_date={target_date}. Skipping."
+                            )
+                            return
+
+                        # Append new record
+                        combined_df = pd.concat([existing_df, new_record], ignore_index=True)
+                    else:
+                        combined_df = new_record
+
+                    # Write back to storage (inside lock)
+                    combined_df.to_parquet(self.storage_path, index=False)
+
+                    logger.info(
+                        f"Logged prediction: horizon={horizon}, "
+                        f"target_date={target_date.date()}, "
+                        f"predicted_mean={predicted_mean:.2f}"
                     )
 
-                    if duplicate_mask.any():
-                        logger.warning(
-                            f"Duplicate prediction exists for forecast_date={forecast_date}, "
-                            f"horizon={horizon}, target_date={target_date}. Skipping."
-                        )
-                        return
-
-                    # Append new record
-                    combined_df = pd.concat([existing_df, new_record], ignore_index=True)
-                else:
-                    combined_df = new_record
-
-                # Write back to storage
-                combined_df.to_parquet(self.storage_path, index=False)
-
-                logger.info(
-                    f"Logged prediction: horizon={horizon}, "
-                    f"target_date={target_date.date()}, "
-                    f"predicted_mean={predicted_mean:.2f}"
-                )
-
+            except TimeoutError as e:
+                logger.error(f"Timeout acquiring file lock for {self.storage_path}: {e}")
+                raise IOError(f"Failed to acquire file lock: {e}") from e
             except Exception as e:
                 logger.error(f"Failed to log prediction: {e}")
                 raise IOError(f"Failed to write prediction: {e}") from e
@@ -377,15 +385,19 @@ class PredictionTracker:
                         )
                         continue
 
-                # Write updated data back
+                # Write updated data back (with file lock for process safety)
                 if updates_count > 0:
-                    df.to_parquet(self.storage_path, index=False)
+                    with ParquetFileLock(self.storage_path, timeout=30.0):
+                        df.to_parquet(self.storage_path, index=False)
                     logger.success(f"Updated {updates_count} predictions with actual values")
                 else:
                     logger.info("No predictions could be updated (data not yet available)")
 
                 return updates_count
 
+            except TimeoutError as e:
+                logger.error(f"Timeout acquiring file lock for {self.storage_path}: {e}")
+                return 0
             except Exception as e:
                 logger.error(f"Failed to update actuals: {e}")
                 return 0

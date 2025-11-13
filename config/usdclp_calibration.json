@@ -1,0 +1,54 @@
+{
+  "metadata": {
+    "calibration_date": "2025-11-13T15:41:08.300189",
+    "currency_pair": "USD/CLP",
+    "data_source": "Historical analysis"
+  },
+  "volatility": {
+    "daily_std": 0.005761011109613385,
+    "weekly_std": 0.015242202696317287,
+    "monthly_std": 0.03155435738773118,
+    "quarterly_std": 0.05465375019573676,
+    "high_vol_months": [
+      4,
+      10,
+      2
+    ],
+    "low_vol_months": [
+      11,
+      9,
+      3
+    ]
+  },
+  "copper_correlation": {
+    "expected_correlation": -0.04924842848468489,
+    "correlation_std": 0.2244739879414684,
+    "break_threshold": 0.4489479758829368
+  },
+  "drift_detection": {
+    "ks_test_pvalue": 0.05,
+    "high_drift_score_threshold": 40,
+    "medium_drift_score_threshold": 60,
+    "check_window_days": 14,
+    "baseline_window_days": 90
+  },
+  "regime_detection": {
+    "high_vol_zscore": 2.0,
+    "extreme_vol_zscore": 3.0,
+    "copper_shock_threshold": 0.05,
+    "lookback_days": 90
+  },
+  "performance_monitoring": {
+    "baseline_days": 60,
+    "recent_days": 14,
+    "rmse_degradation_threshold": 0.15,
+    "mape_degradation_threshold": 0.2,
+    "significance_level": 0.05
+  },
+  "forecasting": {
+    "ci95_target_coverage": 0.92,
+    "ci80_target_coverage": 0.8,
+    "t_distribution_df": 30,
+    "min_validation_samples": 50
+  }
+}

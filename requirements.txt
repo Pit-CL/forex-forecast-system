@@ -53,6 +53,11 @@ tabulate>=0.9
 python-slugify>=8.0
 markdown>=3.6
 
+# Testing dependencies
+pytest>=8.0
+pytest-cov>=4.1
+pytest-timeout>=2.2
+
 # ==========================================
 # SYSTEM DEPENDENCIES (via apt/brew)
 # ==========================================
@@ -70,3 +75,4 @@ markdown>=3.6
 # Install on macOS:
 # brew install cairo pango gdk-pixbuf libffi
 # ==========================================
+portalocker>=2.0.0  # Cross-platform file locking for concurrent access

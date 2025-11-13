@@ -473,9 +473,41 @@ class ForecastEngine:
         price_path: list | np.ndarray,
         std: np.ndarray | list
     ) -> list[ForecastPoint]:
-        """Build ForecastPoint list from price path and volatility."""
+        """
+        Build ForecastPoint list from price path and volatility.
+
+        Uses t-distribution critical values instead of normal distribution
+        to account for estimation uncertainty and achieve proper CI coverage.
+
+        For confidence intervals, we use:
+        - t-distribution with df=30 (conservative, reflects typical training data)
+        - CI_80: mean ± t(0.90, df=30) * std
+        - CI_95: mean ± t(0.975, df=30) * std
+
+        This accounts for:
+        1. Parameter uncertainty (we estimate std from finite samples)
+        2. Non-normality in forex returns (t has fatter tails)
+        3. Small sample effects in validation
+
+        References:
+        - Student's t-distribution for finite sample inference
+        - Box, G.E.P., Jenkins, G.M. (1976). Time Series Analysis
+        """
+        from scipy import stats
+
         if not isinstance(std, np.ndarray):
             std = np.array(std)
+
+        # Degrees of freedom for t-distribution
+        # Use df=30 as conservative estimate (typical training window)
+        # This gives wider intervals than normal distribution
+        df = 30
+
+        # Critical values from t-distribution
+        # t(0.90, df=30) ≈ 1.310 (vs z=1.282 for normal)
+        # t(0.975, df=30) ≈ 2.042 (vs z=1.96 for normal)
+        t_80 = stats.t.ppf(0.90, df=df)
+        t_95 = stats.t.ppf(0.975, df=df)
 
         # Generate dates based on horizon
         if self.horizon == "monthly":
@@ -495,10 +527,10 @@ class ForecastEngine:
                 ForecastPoint(
                     date=dates[i].to_pydatetime(),
                     mean=float(price),
-                    ci80_low=float(price - 1.2816 * std_price),
-                    ci80_high=float(price + 1.2816 * std_price),
-                    ci95_low=float(price - 1.96 * std_price),
-                    ci95_high=float(price + 1.96 * std_price),
+                    ci80_low=float(price - t_80 * std_price),
+                    ci80_high=float(price + t_80 * std_price),
+                    ci95_low=float(price - t_95 * std_price),
+                    ci95_high=float(price + t_95 * std_price),
                     std_dev=float(std_price),
                 )
             )
