@@ -1,8 +1,8 @@
 # USD/CLP Forex Forecasting System - Project Status
 
-**Last Updated:** 2025-11-12
-**Version:** 2.1.0 (Professional Refinement)
-**Status:** IN PRODUCTION
+**Last Updated:** 2025-11-13 11:00
+**Version:** 2.3.0 (Critical Bug Fix + Production Deployment)
+**Status:** IN PRODUCTION (7-day forecaster running autonomously with auto-recovery)
 
 ---
 
@@ -25,6 +25,102 @@
 ---
 
 ## Recent Milestones
+
+### 2025-11-13 (11:00): Critical Bug Fix - Correlation Matrix + Production Deployment
+
+**Status:** COMPLETED - System now fully autonomous in production
+
+**Major Achievements:**
+1. Fixed critical correlation matrix bug (empty heatmap)
+   - Root cause: Timezone mismatch between data sources
+   - Solution: Date normalization (convert timestamps to date-only)
+   - Result: 1,175 common dates found, correlation values now displaying correctly
+
+2. Production deployment of 7-day forecaster on Vultr
+   - Daily execution at 8:00 AM Chile time (via cron)
+   - Auto-recovery on crash (tested: 8-second restart)
+   - Systemd integration for server reboot resilience
+   - Email notifications working (tested with recipients)
+
+3. Resolved email spam issue
+   - Implemented proper cron-based scheduling inside container
+   - Docker restart policy now serves only as crash recovery
+   - Zero duplicate emails from infinite restart loops
+
+**Files Modified:**
+- `src/forex_core/reporting/charting.py` - Date normalization for correlation matrix
+- `src/forex_core/reporting/chart_interpretations.py` - Consistency with charting logic
+
+**Files Created:**
+- `Dockerfile.7d.prod` - Production Docker image with cron
+- `docker-compose.prod.yml` - Production compose configuration
+- `cron/7d/crontab` - Cron schedule (8:00 AM daily)
+- `cron/7d/entrypoint.sh` - Container entrypoint with cron
+- `/etc/systemd/system/usdclp-forecaster.service` - Systemd service
+- `PRODUCTION_DEPLOYMENT.md` - 500+ line deployment guide
+
+**Session Documentation:**
+- `docs/sessions/2025-11-13-1100-correlation-matrix-bug-fix-production-deployment.md`
+
+**Current Production Status:**
+- Container: `usdclp-forecaster-7d` (Running, healthy)
+- Next execution: Daily 8:00 AM Chile time
+- Health: All systems operational
+- Monitoring: Cron logs + Docker healthcheck active
+
+### 2025-11-12 (21:45): Vultr Sync - Chart Explanations Fix
+
+**Status:** COMPLETED - Deployed to Production
+
+**Issue Resolved:**
+- Production PDF was missing chart explanations ("Interpretación:" sections)
+- Local code had correct implementation but wasn't synced to Vultr
+- Manual sync of `builder.py` and `report.html.j2` resolved the issue
+
+**Actions Taken:**
+1. Verified local code had `_build_chart_blocks()` method (lines 123-208)
+2. Synchronized `builder.py` from local to Vultr
+3. Synchronized `report.html.j2` template from local to Vultr
+4. Generated test PDF: `usdclp_report_daily_20251112_2145.pdf` (1.3 MB)
+5. Verified all 6 charts display explanations correctly
+
+**Result:**
+- Production PDF now shows professional explanations below each chart
+- Confidence interval colors correct (orange #FF8C00, violet #8B00FF)
+- Page breaks properly managed (chart + explanation stay together)
+
+**Session Documentation:**
+- `docs/sessions/SESSION_2025-11-12_VULTR_SYNC_CHART_EXPLANATIONS.md`
+
+### 2025-11-12 (Evening): Chart Explanations Enhancement
+
+**Status:** COMPLETED - Synced to Production
+
+**Major Improvements:**
+1. Refactored PDF reports to pair chart explanations directly below each chart
+2. Added professional styling with page-break protection (charts + explanations stay together)
+3. Implemented dynamic statistical insights (RSI values, TPM rates, risk regime status)
+4. Created structured chart blocks (title + image + interpretation) for all 6 charts
+5. Enhanced readability by eliminating separated chart/explanation sections
+
+**Key Metrics:**
+- Code Modified: ~200 lines added, ~90 removed (net +110 lines)
+- Files Changed: 3 files (builder.py, report.html.j2, email.py)
+- Chart Explanations: 6 charts now with 2-3 sentence interpretations
+- Dynamic Insights: 3 charts show live market data (Technical, Macro, Risk Regime)
+- Development Time: ~90 minutes
+
+**Critical Features:**
+- `page-break-inside: avoid` ensures charts never split from explanations
+- Blue accent bar and italic styling for professional appearance
+- Dynamic RSI/MACD/TPM/Regime values extracted from bundle
+- Fallback text if market data unavailable
+
+**User Benefits:**
+- No more page-flipping between charts and explanations
+- Context-aware interpretations with current market values
+- Professional visual hierarchy (gray blocks, blue accents)
+- Improved comprehension for non-expert readers
 
 ### 2025-11-12 (Afternoon): Professional Refinement - Chart Formatting & Methodology
 
@@ -292,33 +388,57 @@ Production Deployment (Vultr):
 
 ## Known Issues
 
-### Issues (None Critical)
+### Issues (None Critical - All Major Issues Resolved!)
 
-1. **Refinement Changes Not Yet Deployed**
-   - Status: Code complete, pending deployment
-   - Changes: Date formatting fixes, methodology expansion
-   - Impact: None (backward compatible)
-   - Priority: High
-   - Next Action: Commit + deploy to Vultr
+1. **RESOLVED - Correlation Matrix Bug**
+   - Status: FIXED (2025-11-13)
+   - Problem: Empty heatmap with no correlation values
+   - Solution: Implemented date normalization for timezone-aware series
+   - Files changed: charting.py, chart_interpretations.py
+   - Result: 1,175 common dates found, correlations displaying correctly
+   - Impact: RESOLVED - Production-ready
 
-2. **Test Coverage Below Target**
+1a. **Chart Explanations Need Professional Enhancement**
+   - Status: Deployed but explanations are didactic, need trader-to-trader tone
+   - Current: Generic explanations (e.g., "La banda naranja muestra...")
+   - Desired: Professional insights (e.g., "RSI en 68 sugiere sobrecompra, resistencia en $950")
+   - Impact: Low (current version functional, just needs refinement)
+   - Priority: Medium
+   - Next Action: Review and enhance explanation texts in builder.py
+
+1b. **Confidence Bands Not Visible in Charts**
+   - Status: FIXED (2025-11-12)
+   - Solution: Corrected confidence interval colors in forecast charts
+   - Files changed: charting.py
+   - Result: Orange (#FF8C00) and violet (#8B00FF) bands now displaying correctly
+   - Impact: RESOLVED - Bands visible in all generated PDFs
+
+2. **Deployment Synchronization Process Needs Automation**
+   - Status: Manual sync required (SCP files from local to Vultr)
+   - Current: Manual copy of files when code updated
+   - Desired: Automated git pull on Vultr after push to GitHub
+   - Impact: Medium (risk of desync, manual errors)
+   - Priority: Medium
+   - Next Action: Set up GitHub Actions or deployment script
+
+3. **Test Coverage Below Target**
    - Current: 31%, Target: 80%
    - Impact: Low (core functionality tested)
    - Priority: Medium
-   - Plan: Add 20+ tests for new sections/charts
+   - Plan: Add 20+ tests for new sections/charts/explanations
 
-3. **No Historical Accuracy Tracking**
+4. **No Historical Accuracy Tracking**
    - Impact: Medium (can't measure model performance over time)
    - Priority: Medium
    - Plan: Implement in next sprint
 
-4. **Sequential Chart Generation**
+5. **Sequential Chart Generation**
    - Current: 3 seconds for 6 charts
    - Potential: 1 second with parallel generation
    - Impact: Low (only 2 seconds difference)
    - Priority: Low
 
-5. **Magic Numbers in Code**
+6. **Magic Numbers in Code**
    - Thresholds hardcoded (RSI 70/30, Bollinger 2.0)
    - Impact: Low (standard values)
    - Priority: Low
@@ -377,15 +497,50 @@ Resource Usage:
 
 ## Next Steps
 
-### Immediate (Today)
+### Completed Today (2025-11-13)
 
-- [ ] **Deploy Refinement Changes to Production**
-  - Commit: charting.py, builder.py modifications
-  - Push to GitHub main branch
-  - SSH to Vultr: `ssh reporting`
-  - Pull latest: `git pull origin main`
-  - Test execution: `python -m services.forecaster_7d.cli run`
-  - Verify PDF quality improvements
+- [x] **Fix Critical Correlation Matrix Bug** - COMPLETED
+  - Root cause: Timezone mismatch between data sources
+  - Solution: Implemented date normalization
+  - Result: 1,175 common dates found, values displaying correctly
+
+- [x] **Deploy 7-Day Forecaster to Production** - COMPLETED
+  - Container: `usdclp-forecaster-7d` running on Vultr
+  - Schedule: Daily 8:00 AM Chile time (cron configured)
+  - Auto-recovery: Tested and verified (8-second restart)
+  - Email notifications: Tested and confirmed working
+
+- [x] **Implement Systemd Service** - COMPLETED
+  - Service file: `/etc/systemd/system/usdclp-forecaster.service`
+  - Status: Enabled and active
+  - Benefit: Auto-start on server reboot
+
+- [x] **Complete Session Documentation** - COMPLETED
+  - File: `docs/sessions/2025-11-13-1100-correlation-matrix-bug-fix-production-deployment.md`
+  - Length: 800+ lines with technical deep dives
+  - Content: Architecture, code changes, commands, future improvements
+
+### Immediate (Next 24 Hours)
+
+- [ ] **Monitor Production Execution**
+  - Watch cron logs for tomorrow's 8:00 AM execution
+  - Verify PDF generation completes successfully
+  - Confirm email delivery
+  - Check for any errors or warnings
+  - Estimated: 5 minutes (observation task)
+
+- [ ] **Commit Changes to Git**
+  - Files to commit:
+    - `src/forex_core/reporting/charting.py` (timezone fix)
+    - `src/forex_core/reporting/chart_interpretations.py` (consistency)
+    - `Dockerfile.7d.prod` (production image)
+    - `docker-compose.prod.yml` (production config)
+    - `cron/7d/crontab` (cron schedule)
+    - `cron/7d/entrypoint.sh` (container startup)
+    - `PRODUCTION_DEPLOYMENT.md` (deployment guide)
+    - `PROJECT_STATUS.md` (this file)
+  - Suggested commit message: "fix(correlation): Resolve timezone bug + deploy to production with auto-recovery"
+  - Push to GitHub main
   - Estimated: 10 minutes
 
 ### High Priority (Next 1-2 Weeks)
@@ -475,13 +630,16 @@ ab6382f - feat: Upgrade to institutional-grade PDF reports (2025-11-12)
 2. **MIGRATION_COMPLETE.md** - Migration summary
 3. **INSTITUTIONAL_UPGRADE_SUMMARY.md** - Enhancement summary
 4. **docs/sessions/SESSION_2025-11-12_INSTITUTIONAL_UPGRADE.md** - Institutional upgrade session
-5. **docs/sessions/SESSION_2025-11-12_REFINEMENT.md** - Professional refinement session (NEW)
-6. **docs/deployment/VULTR_DEPLOYMENT_GUIDE.md** - Production deployment guide
-7. **docs/architecture/SYSTEM_ARCHITECTURE.md** - Technical architecture
-8. **docs/reviews/2025-11-12-comprehensive-system-review.md** - Code review
-9. **docs/PDF_ENHANCEMENT_CHANGELOG.md** - PDF enhancement details
-10. **docs/DOCKER.md** - Docker usage guide
-11. **README.md** - Project overview
+5. **docs/sessions/SESSION_2025-11-12_REFINEMENT.md** - Professional refinement session
+6. **docs/sessions/SESSION_2025-11-12_CHART_EXPLANATIONS.md** - Chart explanations refactor
+7. **docs/sessions/SESSION_2025-11-12_VULTR_SYNC_CHART_EXPLANATIONS.md** - Vultr sync and deployment fix (NEW)
+8. **docs/CHART_EXPLANATIONS_REFACTOR.md** - Implementation summary for chart explanations
+9. **docs/deployment/VULTR_DEPLOYMENT_GUIDE.md** - Production deployment guide
+10. **docs/architecture/SYSTEM_ARCHITECTURE.md** - Technical architecture
+11. **docs/reviews/2025-11-12-comprehensive-system-review.md** - Code review
+12. **docs/PDF_ENHANCEMENT_CHANGELOG.md** - PDF enhancement details
+13. **docs/DOCKER.md** - Docker usage guide
+14. **README.md** - Project overview
 
 ### Quick Start Commands
 
@@ -581,13 +739,33 @@ PDF Size                1.2 MB
 
 ## Version History
 
-### Version 2.1.0 (2025-11-12 PM) - CURRENT
+### Version 2.3.0 (2025-11-13) - CURRENT PRODUCTION
+- Fixed critical correlation matrix bug (timezone mismatch)
+- Deployed 7-day forecaster to Vultr with autonomous daily execution
+- Implemented auto-recovery on crash (8-second restart)
+- Systemd integration for server reboot resilience
+- Cron-based scheduling for reliable daily execution at 8:00 AM Chile time
+- Email notifications working and tested
+- Production deployment fully documented
+- All major issues resolved and production-ready
+- Session documentation complete
+- Next execution: Tomorrow 8:00 AM
+
+### Version 2.2.0 (2025-11-12 Evening)
+- Chart explanations paired with images in PDF reports
+- Professional styling with page-break protection
+- Dynamic statistical insights (RSI, TPM, regime values)
+- Structured chart blocks (title + image + interpretation)
+- Enhanced readability for non-expert readers
+- 110 net new lines of code across 3 files
+
+### Version 2.1.0 (2025-11-12 Afternoon)
 - Professional refinements applied
 - Fixed date label overlapping (6 charts, 9 axes)
 - Expanded methodology section (186 lines)
 - Added chart explanations (80 lines)
 - Academic source attribution on all charts
-- Ready for production deployment
+- Ready for production deployment (will deploy with 2.2.0)
 
 ### Version 2.0.0 (2025-11-12 AM)
 - Institutional-grade PDF (8-12 pages, 6 charts)
