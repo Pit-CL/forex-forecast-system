@@ -158,30 +158,32 @@ class ChartGenerator:
         # Create figure
         fig, ax = plt.subplots(figsize=(10, 5))
 
-        # Plot historical data
-        hist.plot(ax=ax, label="Histórico 30d", color="#1f77b4", linewidth=2)
-
-        # Plot forecast mean
-        fc_df["mean"].plot(
-            ax=ax, label="Proyección media", color="#d62728", linewidth=2
-        )
-
-        # Plot confidence intervals with distinct colors
-        ax.fill_between(
-            fc_df.index,
-            fc_df["ci80_low"],
-            fc_df["ci80_high"],
-            color="#FF8C00",  # Orange for 80% CI
-            alpha=0.35,
-            label="IC 80%",
-        )
+        # Plot confidence intervals FIRST (so they appear behind)
         ax.fill_between(
             fc_df.index,
             fc_df["ci95_low"],
             fc_df["ci95_high"],
             color="#8B00FF",  # Violet for 95% CI
-            alpha=0.25,
+            alpha=0.3,
             label="IC 95%",
+            zorder=1,
+        )
+        ax.fill_between(
+            fc_df.index,
+            fc_df["ci80_low"],
+            fc_df["ci80_high"],
+            color="#FF8C00",  # Orange for 80% CI
+            alpha=0.4,
+            label="IC 80%",
+            zorder=2,
+        )
+
+        # Plot historical data (on top of bands)
+        hist.plot(ax=ax, label="Histórico 30d", color="#1f77b4", linewidth=2, zorder=3)
+
+        # Plot forecast mean (on top of everything)
+        fc_df["mean"].plot(
+            ax=ax, label="Proyección media", color="#d62728", linewidth=2, zorder=4
         )
 
         # Formatting
@@ -229,27 +231,29 @@ class ChartGenerator:
         # Create figure
         fig, ax = plt.subplots(figsize=(10, 4))
 
-        # Plot forecast mean
-        fc_df["mean"].plot(
-            ax=ax, color="#2ca02c", label="Media proyectada", linewidth=2
-        )
-
-        # Plot confidence intervals with distinct colors
-        ax.fill_between(
-            fc_df.index,
-            fc_df["ci80_low"],
-            fc_df["ci80_high"],
-            alpha=0.35,
-            color="#FF8C00",  # Orange for 80% CI
-            label="IC 80%",
-        )
+        # Plot confidence intervals FIRST (so they appear behind)
         ax.fill_between(
             fc_df.index,
             fc_df["ci95_low"],
             fc_df["ci95_high"],
-            alpha=0.25,
+            alpha=0.3,
             color="#8B00FF",  # Violet for 95% CI
             label="IC 95%",
+            zorder=1,
+        )
+        ax.fill_between(
+            fc_df.index,
+            fc_df["ci80_low"],
+            fc_df["ci80_high"],
+            alpha=0.4,
+            color="#FF8C00",  # Orange for 80% CI
+            label="IC 80%",
+            zorder=2,
+        )
+
+        # Plot forecast mean (on top of bands)
+        fc_df["mean"].plot(
+            ax=ax, color="#2ca02c", label="Media proyectada", linewidth=2, zorder=3
         )
 
         # Formatting
