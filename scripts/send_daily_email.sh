@@ -78,7 +78,7 @@ fi
 # Check if email should be sent today
 log_info "Checking if email should be sent today..."
 
-SHOULD_SEND=$(PYTHONPATH=src:$PYTHONPATH python -c "
+SHOULD_SEND=$(PYTHONPATH=src:${PYTHONPATH:-} python -c "
 from pathlib import Path
 from datetime import datetime
 from forex_core.notifications.unified_email import UnifiedEmailOrchestrator
@@ -98,7 +98,7 @@ log_success "Email should be sent today"
 # Get horizons to include
 log_info "Determining which horizons to include..."
 
-HORIZONS=$(PYTHONPATH=src:$PYTHONPATH python -c "
+HORIZONS=$(PYTHONPATH=src:${PYTHONPATH:-} python -c "
 from pathlib import Path
 from forex_core.notifications.unified_email import UnifiedEmailOrchestrator
 
@@ -112,7 +112,7 @@ log_info "Horizons for today: ${HORIZONS}"
 # Generate and send unified email
 log_info "Generating unified email..."
 
-PYTHONPATH=src:$PYTHONPATH python -c "
+PYTHONPATH=src:${PYTHONPATH:-} python -c "
 import sys
 sys.path.insert(0, 'src')
 from pathlib import Path
