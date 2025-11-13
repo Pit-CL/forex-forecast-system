@@ -99,8 +99,13 @@ class ChartGenerator:
         """
         charts = {}
 
-        # Chart 1: Historical + Forecast
-        charts["hist_forecast"] = self._generate_hist_forecast_chart(
+        # Chart 1A: Historical Overview (context, no bands)
+        charts["hist_overview"] = self._generate_hist_forecast_overview(
+            bundle, forecast, horizon
+        )
+
+        # Chart 1B: Tactical Zoom (last 5 days + forecast WITH bands)
+        charts["tactical_zoom"] = self._generate_tactical_zoom_chart(
             bundle, forecast, horizon
         )
 
@@ -123,14 +128,14 @@ class ChartGenerator:
 
         return charts
 
-    def _generate_hist_forecast_chart(
+    def _generate_hist_forecast_overview(
         self,
         bundle: DataBundle,
         forecast: ForecastResult,
         horizon: str,
     ) -> Path:
         """
-        Generate chart showing historical data and forecast projection.
+        Generate overview chart showing full historical context + forecast (NO confidence bands).
 
         Args:
             bundle: Data bundle with historical series
@@ -158,43 +163,104 @@ class ChartGenerator:
         # Create figure
         fig, ax = plt.subplots(figsize=(10, 5))
 
-        # Plot confidence intervals FIRST (so they appear behind)
-        ax.fill_between(
-            fc_df.index,
-            fc_df["ci95_low"],
-            fc_df["ci95_high"],
-            color="#8B00FF",  # Violet for 95% CI
-            alpha=0.3,
-            label="IC 95%",
-            zorder=1,
-        )
-        ax.fill_between(
-            fc_df.index,
-            fc_df["ci80_low"],
-            fc_df["ci80_high"],
-            color="#FF8C00",  # Orange for 80% CI
-            alpha=0.4,
-            label="IC 80%",
-            zorder=2,
-        )
+        # Plot historical data (full 30 days for context)
+        ax.plot(hist.index, hist.values, label="Histórico 30d", color="#1f77b4", linewidth=2)
 
-        # Plot historical data (on top of bands)
-        hist.plot(ax=ax, label="Histórico 30d", color="#1f77b4", linewidth=2, zorder=3)
-
-        # Plot forecast mean (on top of everything)
-        fc_df["mean"].plot(
-            ax=ax, label="Proyección media", color="#d62728", linewidth=2, zorder=4
-        )
+        # Plot forecast mean
+        ax.plot(fc_df.index, fc_df["mean"].values, label="Proyección media", color="#d62728", linewidth=2.5)
 
         # Formatting
-        title = f"USD/CLP - Histórico reciente + Proyección {horizon}"
+        title = f"USD/CLP - Contexto Histórico + Proyección {horizon}"
         ax.set_title(title, fontsize=14, fontweight="bold")
         ax.set_ylabel("CLP por USD", fontsize=12)
         ax.legend(loc="best", fontsize=10)
         ax.grid(True, alpha=0.3)
 
         # Save chart
-        chart_path = self.chart_dir / f"chart_hist_forecast_{horizon}.png"
+        chart_path = self.chart_dir / f"chart_hist_overview_{horizon}.png"
+        fig.tight_layout()
+        fig.savefig(chart_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+        return chart_path
+
+    def _generate_tactical_zoom_chart(
+        self,
+        bundle: DataBundle,
+        forecast: ForecastResult,
+        horizon: str,
+    ) -> Path:
+        """
+        Generate tactical zoom chart showing last 5 days + forecast WITH confidence bands.
+
+        Args:
+            bundle: Data bundle with historical series
+            forecast: Forecast results
+            horizon: Forecast horizon for labeling
+
+        Returns:
+            Path to saved chart file
+        """
+        # Get last 5 days only for tactical zoom
+        hist = bundle.usdclp_series.tail(5)
+
+        # Build forecast DataFrame
+        fc_df = pd.DataFrame(
+            {
+                "mean": [point.mean for point in forecast.series],
+                "ci80_low": [point.ci80_low for point in forecast.series],
+                "ci80_high": [point.ci80_high for point in forecast.series],
+                "ci95_low": [point.ci95_low for point in forecast.series],
+                "ci95_high": [point.ci95_high for point in forecast.series],
+            },
+            index=[point.date for point in forecast.series],
+        )
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        # Plot historical data (last 5 days)
+        ax.plot(hist.index, hist.values, label="Últimos 5d", color="#1f77b4", linewidth=2, marker='o', markersize=4)
+
+        # Plot confidence intervals with HIGH visibility
+        ax.fill_between(
+            fc_df.index,
+            fc_df["ci95_low"].values,
+            fc_df["ci95_high"].values,
+            color="#8B00FF",
+            alpha=0.5,
+            label="IC 95%",
+            zorder=2,
+        )
+        ax.fill_between(
+            fc_df.index,
+            fc_df["ci80_low"].values,
+            fc_df["ci80_high"].values,
+            color="#FF8C00",
+            alpha=0.65,
+            label="IC 80%",
+            zorder=3,
+        )
+
+        # Plot forecast mean
+        ax.plot(fc_df.index, fc_df["mean"].values, label="Proyección media", color="#d62728", linewidth=2.5, marker='o', markersize=4)
+
+        # Formatting
+        title = f"USD/CLP - Zoom Táctico (Últimos 5d + Proyección {horizon})"
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_ylabel("CLP por USD", fontsize=12)
+        ax.legend(loc="best", fontsize=10)
+        ax.grid(True, alpha=0.3)
+
+        # Tight Y-axis for visibility
+        all_values = list(hist.values) + list(fc_df["ci95_low"].values) + list(fc_df["ci95_high"].values)
+        y_min = min(all_values)
+        y_max = max(all_values)
+        y_padding = (y_max - y_min) * 0.1  # 10% padding
+        ax.set_ylim(y_min - y_padding, y_max + y_padding)
+
+        # Save chart
+        chart_path = self.chart_dir / f"chart_tactical_zoom_{horizon}.png"
         fig.tight_layout()
         fig.savefig(chart_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
@@ -236,24 +302,26 @@ class ChartGenerator:
             fc_df.index,
             fc_df["ci95_low"],
             fc_df["ci95_high"],
-            alpha=0.3,
-            color="#8B00FF",  # Violet for 95% CI
+            color="#8B00FF",  # Violet for 95% CI (DarkViolet)
+            alpha=0.50,  # Increased from 0.20 for visibility
+            edgecolor="none",
             label="IC 95%",
-            zorder=1,
+            zorder=2,
         )
         ax.fill_between(
             fc_df.index,
             fc_df["ci80_low"],
             fc_df["ci80_high"],
-            alpha=0.4,
-            color="#FF8C00",  # Orange for 80% CI
+            color="#FF8C00",  # Orange for 80% CI (DarkOrange)
+            alpha=0.65,  # Increased from 0.40 for visibility
+            edgecolor="none",
             label="IC 80%",
-            zorder=2,
+            zorder=3,
         )
 
         # Plot forecast mean (on top of bands)
         fc_df["mean"].plot(
-            ax=ax, color="#2ca02c", label="Media proyectada", linewidth=2, zorder=3
+            ax=ax, color="#2ca02c", label="Media proyectada", linewidth=2, zorder=4
         )
 
         # Formatting
@@ -261,7 +329,7 @@ class ChartGenerator:
         ax.set_title(title, fontsize=14, fontweight="bold")
         ax.set_ylabel("CLP por USD", fontsize=12)
         ax.legend(loc="best", fontsize=10)
-        ax.grid(True, alpha=0.3)
+        ax.grid(True, alpha=0.3, zorder=1)
 
         # Save chart
         chart_path = self.chart_dir / f"chart_forecast_bands_{horizon}.png"
@@ -397,24 +465,68 @@ class ChartGenerator:
         """
         import numpy as np
 
-        # Build correlation dataframe
-        corr_data = pd.DataFrame({
-            "USD/CLP": bundle.usdclp_series,
-            "Cobre": bundle.copper_series,
-            "DXY": bundle.dxy_series if hasattr(bundle, "dxy_series") else bundle.usdclp_series * 0,
-        })
+        # Build correlation dataframe - only include series that exist
+        # Start with required series - NORMALIZE DATES TO REMOVE TIME/TZ
+        series_list = []
+        series_names = []
 
-        # Add VIX and EEM if available
-        if hasattr(bundle, "vix_series"):
-            corr_data["VIX"] = bundle.vix_series
-        if hasattr(bundle, "eem_series"):
-            corr_data["EEM"] = bundle.eem_series
+        # USD/CLP (required)
+        usdclp_normalized = bundle.usdclp_series.copy()
+        usdclp_normalized.index = pd.to_datetime(usdclp_normalized.index.date)
+        series_list.append(usdclp_normalized)
+        series_names.append("USD/CLP")
 
-        # Compute returns for correlation
-        corr_returns = corr_data.pct_change().dropna()
+        # Copper (required)
+        copper_normalized = bundle.copper_series.copy()
+        copper_normalized.index = pd.to_datetime(copper_normalized.index.date)
+        series_list.append(copper_normalized)
+        series_names.append("Cobre")
 
-        # Compute correlation matrix
-        corr_matrix = corr_returns.corr()
+        # Add optional series only if they exist and have data - NORMALIZE DATES
+        if hasattr(bundle, "dxy_series") and bundle.dxy_series is not None and len(bundle.dxy_series) > 0:
+            dxy_normalized = bundle.dxy_series.copy()
+            dxy_normalized.index = pd.to_datetime(dxy_normalized.index.date)
+            series_list.append(dxy_normalized)
+            series_names.append("DXY")
+
+        if hasattr(bundle, "vix_series") and bundle.vix_series is not None and len(bundle.vix_series) > 0:
+            vix_normalized = bundle.vix_series.copy()
+            vix_normalized.index = pd.to_datetime(vix_normalized.index.date)
+            series_list.append(vix_normalized)
+            series_names.append("VIX")
+
+        if hasattr(bundle, "eem_series") and bundle.eem_series is not None and len(bundle.eem_series) > 0:
+            eem_normalized = bundle.eem_series.copy()
+            eem_normalized.index = pd.to_datetime(eem_normalized.index.date)
+            series_list.append(eem_normalized)
+            series_names.append("EEM")
+
+        # Concatenate series with INNER join to keep only common dates (now normalized)
+        corr_data = pd.concat(series_list, axis=1, keys=series_names, join='inner')
+
+        # Drop any remaining rows with NaN values (should be few or none with inner join)
+        corr_data = corr_data.dropna()
+
+        # Check if we have enough data (minimum 5 observations for statistical reliability)
+        MIN_CORRELATION_OBSERVATIONS = 5
+        if len(corr_data) < MIN_CORRELATION_OBSERVATIONS:
+            from forex_core.utils.logging import logger
+            logger.warning(
+                f"Insufficient data for correlation matrix: {len(corr_data)} rows "
+                f"(need at least {MIN_CORRELATION_OBSERVATIONS}). Creating NaN matrix."
+            )
+            # Create empty correlation matrix as fallback
+            corr_matrix = pd.DataFrame(
+                np.nan,
+                index=series_names,
+                columns=series_names
+            )
+        else:
+            # Compute returns for correlation
+            corr_returns = corr_data.pct_change(fill_method=None).dropna()
+
+            # Compute correlation matrix
+            corr_matrix = corr_returns.corr()
 
         # Create heatmap
         fig, ax = plt.subplots(figsize=(10, 8))

@@ -96,7 +96,7 @@ class ReportBuilder:
         # Convert charts to base64 with explanations
         from .charting import ChartGenerator
 
-        chart_blocks = self._build_chart_blocks(bundle, charts)
+        chart_blocks = self._build_chart_blocks(bundle, charts, forecast, horizon)
 
         # Build markdown sections
         markdown_body = self._build_markdown_sections(
@@ -124,6 +124,8 @@ class ReportBuilder:
         self,
         bundle: DataBundle,
         charts: Dict[str, Path],
+        forecast: ForecastResult,
+        horizon: str,
     ) -> List[Dict[str, str]]:
         """
         Build chart blocks with embedded explanations.
@@ -131,6 +133,8 @@ class ReportBuilder:
         Args:
             bundle: Data bundle for generating explanations
             charts: Dictionary mapping chart names to file paths
+            forecast: Forecast results for dynamic interpretations
+            horizon: Forecast horizon for context
 
         Returns:
             List of chart blocks, each containing:
@@ -139,36 +143,43 @@ class ReportBuilder:
             - explanation: 2-3 sentence interpretation
         """
         from .charting import ChartGenerator
+        from .chart_interpretations import (
+            interpret_hist_overview,
+            interpret_tactical_zoom,
+            interpret_forecast_bands,
+            interpret_correlation_matrix,
+        )
 
         blocks = []
 
-        # Chart 1: Historical + Forecast
-        if "hist_forecast" in charts:
+        # Chart 1A: Historical Overview (30d + forecast, no bands)
+        if "hist_overview" in charts:
+            explanation = interpret_hist_overview(bundle, forecast, horizon)
             blocks.append({
-                "image": ChartGenerator.image_to_base64(charts["hist_forecast"]),
-                "title": "Proyección USD/CLP con Histórico",
-                "explanation": (
-                    "El par muestra consolidación lateral en 936-938 tras rally previo. Proyección apunta a +0.11% en 7 días hacia 937.9, "
-                    "con soporte técnico en 930 (piso IC 95%) y resistencia en 945 (techo IC 95%). La estrechez de bandas indica baja volatilidad esperada: "
-                    "favorable para carry trades y coberturas a plazo fijo. Monitore quiebres de 930 (señal bajista confirmada) o 940 (retest de máximos). "
-                    "En este entorno, vendedores de opciones encuentran primas atractivas por bajo vol implícito."
-                ),
+                "image": ChartGenerator.image_to_base64(charts["hist_overview"]),
+                "title": "USD/CLP - Contexto Histórico + Proyección",
+                "explanation": explanation,
             })
 
-        # Chart 2: Forecast Bands
+        # Chart 1B: Tactical Zoom (last 5d + forecast WITH bands)
+        if "tactical_zoom" in charts:
+            explanation = interpret_tactical_zoom(bundle, forecast, horizon)
+            blocks.append({
+                "image": ChartGenerator.image_to_base64(charts["tactical_zoom"]),
+                "title": "USD/CLP - Zoom Táctico (Niveles de Trading)",
+                "explanation": explanation,
+            })
+
+        # Chart 2: Forecast Bands (DYNAMIC)
         if "forecast_bands" in charts:
+            explanation = interpret_forecast_bands(forecast, bundle, horizon)
             blocks.append({
                 "image": ChartGenerator.image_to_base64(charts["forecast_bands"]),
-                "title": "Bandas de Proyección",
-                "explanation": (
-                    "Use IC 80% (banda naranja 932-943) para sizing de posiciones core y stops técnicos. "
-                    "El IC 95% (banda violeta 925-950) marca niveles extremos para oportunidades contrarian o hedge tail-risk. "
-                    "La amplitud actual de 11 pesos en IC 80% sugiere volatilidad moderada: apropiado para posiciones direccionales con stops de 1.2% desde entrada. "
-                    "Si bandas se expanden >15 pesos, reduzca exposición; si contraen <8 pesos, suba apalancamiento. Entrada larga conservadora: 932-933, corta: 942-943."
-                ),
+                "title": "Bandas de Proyección (IC 80% / IC 95%)",
+                "explanation": explanation,
             })
 
-        # Chart 3: Technical Panel
+        # Chart 3: Technical Panel (already dynamic)
         if "technical_panel" in charts:
             explanation = self._get_technical_panel_explanation(bundle)
             blocks.append({
@@ -177,20 +188,16 @@ class ReportBuilder:
                 "explanation": explanation,
             })
 
-        # Chart 4: Correlation Matrix
+        # Chart 4: Correlation Matrix (DYNAMIC)
         if "correlation" in charts:
+            explanation = interpret_correlation_matrix(bundle, horizon)
             blocks.append({
                 "image": ChartGenerator.image_to_base64(charts["correlation"]),
                 "title": "Matriz de Correlaciones",
-                "explanation": (
-                    "Leading indicator clave: Cobre muestra correlación inversa -0.65 con 24h de anticipación típica; monitoree 4.85 USD/lb como piso crítico del CLP. "
-                    "Hedge strategy: Correlación DXY-CLP 0.78 permite coberturas cruzadas con futuros DXY (más líquidos). "
-                    "VIX-EEM -0.82 funciona como early warning: repuntes VIX >18 anticipan fortalecimiento USD/CLP en 48-72h. "
-                    "Decorrelación táctica: TPM-IPC 0.45 sugiere que política monetaria no es driver primario ahora; priorice variables externas (cobre, DXY) en modelos de trading."
-                ),
+                "explanation": explanation,
             })
 
-        # Chart 5: Macro Dashboard
+        # Chart 5: Macro Dashboard (already dynamic)
         if "macro_drivers" in charts:
             explanation = self._get_macro_dashboard_explanation(bundle)
             blocks.append({
@@ -199,7 +206,7 @@ class ReportBuilder:
                 "explanation": explanation,
             })
 
-        # Chart 6: Risk Regime
+        # Chart 6: Risk Regime (already dynamic)
         if "risk_regime" in charts:
             explanation = self._get_regime_explanation(bundle)
             blocks.append({
