@@ -66,6 +66,11 @@ class Forecaster30DConfig:
         """Number of forecast steps (same as projection_days for daily)."""
         return self.projection_days
 
+    @property
+    def horizon_code(self) -> str:
+        """Horizon code for reporting and interpretations (e.g., '30d')."""
+        return "30d"
+
 
 def get_service_config() -> Forecaster30DConfig:
     """

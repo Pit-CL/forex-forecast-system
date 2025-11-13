@@ -19,6 +19,59 @@ from ..data.loader import DataBundle
 from ..data.models import ForecastResult
 
 
+# Horizon-specific lookback periods for dynamic context analysis
+HORIZON_LOOKBACK_CONTEXT = {
+    "7d": 30,
+    "15d": 60,
+    "30d": 90,
+    "90d": 180,
+    "12m": 365,
+}
+
+# Horizon-specific tactical zoom windows
+HORIZON_LOOKBACK_TACTICAL = {
+    "7d": 5,
+    "15d": 10,
+    "30d": 15,
+    "90d": 30,
+    "12m": 60,
+}
+
+# Horizon-specific language for interpretations
+HORIZON_LANGUAGE = {
+    "7d": {
+        "context_label": "Contexto 30d",
+        "projection_label": "Proyección 7d",
+        "tactical_label": "últimos 5d",
+        "timeframe": "próxima semana",
+    },
+    "15d": {
+        "context_label": "Contexto 60d",
+        "projection_label": "Proyección 15d",
+        "tactical_label": "últimos 10d",
+        "timeframe": "próximas 2 semanas",
+    },
+    "30d": {
+        "context_label": "Contexto trimestral",
+        "projection_label": "Proyección mensual",
+        "tactical_label": "últimas 2 semanas",
+        "timeframe": "horizonte mensual",
+    },
+    "90d": {
+        "context_label": "Contexto semestral",
+        "projection_label": "Proyección trimestral",
+        "tactical_label": "último mes",
+        "timeframe": "horizonte 90 días",
+    },
+    "12m": {
+        "context_label": "Contexto anual",
+        "projection_label": "Proyección 12 meses",
+        "tactical_label": "últimos 60d",
+        "timeframe": "horizonte 12 meses",
+    },
+}
+
+
 def interpret_hist_overview(
     bundle: DataBundle,
     forecast: ForecastResult,
@@ -27,44 +80,48 @@ def interpret_hist_overview(
     """
     Generate professional interpretation for Chart 1A - Historical Overview.
 
-    This chart shows 30 days of historical data + forecast trajectory (NO confidence bands).
+    This chart shows horizon-appropriate historical context + forecast trajectory (NO confidence bands).
     Focus: Market context, trend analysis, directional bias.
 
     Args:
         bundle: Data bundle with historical USD/CLP series
         forecast: Forecast results with projection
-        horizon: Forecast horizon (e.g., "7d", "12m")
+        horizon: Forecast horizon (e.g., "7d", "15d", "30d", "90d", "12m")
 
     Returns:
         Professional trader-to-trader interpretation string (2-4 sentences).
 
     Example:
-        >>> interp = interpret_hist_overview(bundle, forecast, "7d")
+        >>> interp = interpret_hist_overview(bundle, forecast, "15d")
         >>> print(interp)
-        Contexto 30d: USD/CLP en rango 935.2-940.8 tras rally +1.2% desde mínimo...
+        Contexto 60d: USD/CLP en rango 935.2-940.8 tras rally +1.2% desde mínimo...
     """
-    # Extract data
-    hist_30d = bundle.usdclp_series.tail(30)
-    current_price = hist_30d.iloc[-1]
-    high_30d = hist_30d.max()
-    low_30d = hist_30d.min()
+    # Get horizon-specific configuration
+    lookback_days = HORIZON_LOOKBACK_CONTEXT.get(horizon, 30)
+    lang = HORIZON_LANGUAGE.get(horizon, HORIZON_LANGUAGE["7d"])
 
-    # Calculate 30-day trend
-    price_change_30d = ((current_price / hist_30d.iloc[0]) - 1) * 100
+    # Extract data with dynamic lookback
+    hist_context = bundle.usdclp_series.tail(lookback_days)
+    current_price = hist_context.iloc[-1]
+    high_context = hist_context.max()
+    low_context = hist_context.min()
+
+    # Calculate trend over lookback period
+    price_change = ((current_price / hist_context.iloc[0]) - 1) * 100
 
     # Forecast endpoint
     forecast_end = forecast.series[-1]
     forecast_change = ((forecast_end.mean / current_price) - 1) * 100
 
     # Determine trend direction
-    if price_change_30d > 0.5:
-        trend_30d = "alcista"
+    if price_change > 0.5:
+        trend_label = "alcista"
         trend_verb = "rally"
-    elif price_change_30d < -0.5:
-        trend_30d = "bajista"
+    elif price_change < -0.5:
+        trend_label = "bajista"
         trend_verb = "corrección"
     else:
-        trend_30d = "lateral"
+        trend_label = "lateral"
         trend_verb = "consolidación"
 
     # Forecast bias
@@ -78,13 +135,13 @@ def interpret_hist_overview(
         forecast_bias = "sesgo neutral"
         action = "Mantener estrategia range-bound, vender volatilidad"
 
-    # Build interpretation
+    # Build interpretation with dynamic language
     interpretation = (
-        f"Contexto 30d: USD/CLP en rango {low_30d:.1f}-{high_30d:.1f} tras {trend_verb} {trend_30d} "
-        f"de {abs(price_change_30d):+.1f}% desde mínimo. Proyección {horizon} apunta a {forecast_end.mean:.1f} "
-        f"({forecast_change:+.2f}%), {forecast_bias}. {action}. "
-        f"Precio actual {current_price:.1f} en {'tercio superior' if current_price > low_30d + 0.66*(high_30d-low_30d) else 'tercio medio' if current_price > low_30d + 0.33*(high_30d-low_30d) else 'tercio inferior'} del rango 30d: "
-        f"{'resistencia próxima {high_30d:.1f}, cautela en longas' if current_price > low_30d + 0.66*(high_30d-low_30d) else 'zona neutral, aguarde breakout direccional' if current_price > low_30d + 0.33*(high_30d-low_30d) else f'soporte cercano {low_30d:.1f}, setup favorable para reversión alcista'}."
+        f"{lang['context_label']}: USD/CLP en rango {low_context:.1f}-{high_context:.1f} tras {trend_verb} {trend_label} "
+        f"de {abs(price_change):+.1f}% desde mínimo. {lang['projection_label']} apunta a {forecast_end.mean:.1f} "
+        f"({forecast_change:+.2f}%), {forecast_bias} para {lang['timeframe']}. {action}. "
+        f"Precio actual {current_price:.1f} en {'tercio superior' if current_price > low_context + 0.66*(high_context-low_context) else 'tercio medio' if current_price > low_context + 0.33*(high_context-low_context) else 'tercio inferior'} del rango: "
+        f"{'resistencia próxima {:.1f}, cautela en longas'.format(high_context) if current_price > low_context + 0.66*(high_context-low_context) else 'zona neutral, aguarde breakout direccional' if current_price > low_context + 0.33*(high_context-low_context) else f'soporte cercano {low_context:.1f}, setup favorable para reversión alcista'}."
     )
 
     return interpretation
@@ -98,28 +155,32 @@ def interpret_tactical_zoom(
     """
     Generate professional interpretation for Chart 1B - Tactical Zoom.
 
-    This chart shows last 5 days + forecast WITH IC bands (80% and 95%).
+    This chart shows horizon-appropriate recent history + forecast WITH IC bands (80% and 95%).
     Focus: Tactical entry/exit levels, position sizing, risk/reward ratios.
 
     Args:
         bundle: Data bundle with historical USD/CLP series
         forecast: Forecast results with confidence intervals
-        horizon: Forecast horizon (e.g., "7d")
+        horizon: Forecast horizon (e.g., "7d", "15d", "30d", "90d")
 
     Returns:
         Professional trader-to-trader interpretation with specific trading levels.
 
     Example:
-        >>> interp = interpret_tactical_zoom(bundle, forecast, "7d")
+        >>> interp = interpret_tactical_zoom(bundle, forecast, "15d")
         >>> print(interp)
-        Zona de trading últimos 5d: 937.2-938.5. IC 80% (937.0-938.3)...
+        Zona de trading últimos 10d: 937.2-938.5. IC 80% (937.0-938.3)...
     """
-    # Extract last 5 days
-    hist_5d = bundle.usdclp_series.tail(5)
-    current_price = hist_5d.iloc[-1]
-    high_5d = hist_5d.max()
-    low_5d = hist_5d.min()
-    range_5d = high_5d - low_5d
+    # Get horizon-specific configuration
+    zoom_days = HORIZON_LOOKBACK_TACTICAL.get(horizon, 5)
+    lang = HORIZON_LANGUAGE.get(horizon, HORIZON_LANGUAGE["7d"])
+
+    # Extract recent history with dynamic window
+    hist_zoom = bundle.usdclp_series.tail(zoom_days)
+    current_price = hist_zoom.iloc[-1]
+    high_zoom = hist_zoom.max()
+    low_zoom = hist_zoom.min()
+    range_zoom = high_zoom - low_zoom
 
     # Forecast first and last points
     fc_first = forecast.series[0]
@@ -167,9 +228,9 @@ def interpret_tactical_zoom(
     short_reward = short_entry_low - short_target
     short_rr = short_reward / short_risk if short_risk > 0 else 0
 
-    # Build interpretation
+    # Build interpretation with dynamic language
     interpretation = (
-        f"Zona de trading últimos 5d: {low_5d:.1f}-{high_5d:.1f} (rango {range_5d:.1f} pesos). "
+        f"Zona de trading {lang['tactical_label']}: {low_zoom:.1f}-{high_zoom:.1f} (rango {range_zoom:.1f} pesos). "
         f"IC 80% proyectado ({ic80_low:.1f}-{ic80_high:.1f}) define core range operativo; "
         f"amplitud {ic80_width:.1f} pesos indica {vol_regime}. "
         f"IC 95% ({ic95_low:.1f}-{ic95_high:.1f}) marca límites extremos para tail-risk hedge. "

@@ -147,7 +147,7 @@ def _generate_charts(
     from forex_core.reporting.charting import ChartGenerator
 
     generator = ChartGenerator(settings)
-    return generator.generate(bundle, forecast, horizon=service_config.horizon)
+    return generator.generate(bundle, forecast, horizon=service_config.horizon_code)
 
 
 def _build_report(
@@ -176,7 +176,7 @@ def _build_report(
         forecast=forecast,
         artifacts=artifacts_dict,
         charts=chart_paths,
-        horizon=service_config.horizon,
+        horizon=service_config.horizon_code,
     )
 
 
