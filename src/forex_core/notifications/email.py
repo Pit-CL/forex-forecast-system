@@ -428,3 +428,89 @@ Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')} (Chile)
             "HTML email sent successfully",
             extra={"recipients": self.recipients, "subject": subject},
         )
+
+    def send_unified(
+        self,
+        html_body: str,
+        subject: str,
+        pdf_attachments: List[Path] | None = None,
+        text_body: str | None = None,
+    ) -> None:
+        """
+        Send unified email with HTML body and optional PDF attachments.
+
+        This method combines HTML email with PDF attachments for the
+        unified email system.
+
+        Args:
+            html_body: HTML content for email body
+            subject: Email subject line
+            pdf_attachments: Optional list of PDF paths to attach
+            text_body: Plain text fallback (auto-generated from HTML if None)
+
+        Raises:
+            smtplib.SMTPException: If email sending fails
+            FileNotFoundError: If any PDF attachment doesn't exist
+        """
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        from email.mime.application import MIMEApplication
+
+        logger.info(
+            f"Sending unified email: {subject}",
+            extra={
+                "recipients": len(self.recipients),
+                "attachments": len(pdf_attachments) if pdf_attachments else 0,
+            },
+        )
+
+        # Verify PDF attachments exist
+        if pdf_attachments:
+            for pdf_path in pdf_attachments:
+                if not pdf_path.exists():
+                    raise FileNotFoundError(f"PDF attachment not found: {pdf_path}")
+
+        # Create multipart message
+        message = MIMEMultipart("alternative")
+        message["Subject"] = subject
+        message["From"] = self.gmail_user
+        message["To"] = ", ".join(self.recipients)
+
+        # Plain text fallback
+        if text_body is None:
+            # Simple HTML to text conversion
+            import re
+            text_body = re.sub(r'<[^>]+>', '', html_body)
+
+        # Attach both plain text and HTML
+        part1 = MIMEText(text_body, "plain")
+        part2 = MIMEText(html_body, "html")
+
+        message.attach(part1)
+        message.attach(part2)
+
+        # Attach PDFs if provided
+        if pdf_attachments:
+            for pdf_path in pdf_attachments:
+                with open(pdf_path, "rb") as pdf_file:
+                    pdf_attachment = MIMEApplication(pdf_file.read(), _subtype="pdf")
+                    pdf_attachment.add_header(
+                        "Content-Disposition",
+                        "attachment",
+                        filename=pdf_path.name,
+                    )
+                    message.attach(pdf_attachment)
+
+        # Send via SMTP
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(self.gmail_user, self.gmail_password)
+            server.send_message(message)
+
+        logger.info(
+            "Unified email sent successfully",
+            extra={
+                "recipients": self.recipients,
+                "subject": subject,
+                "attachments": len(pdf_attachments) if pdf_attachments else 0,
+            },
+        )

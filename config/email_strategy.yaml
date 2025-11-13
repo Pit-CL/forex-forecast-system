@@ -1,0 +1,260 @@
+# Email Strategy Configuration
+# Unified email system for USD/CLP Forecasting System
+#
+# Strategy based on USD/CLP market expert recommendations:
+# - Optimized send times for Chilean market
+# - Frequency based on corporate decision cycles
+# - Conditional PDF attachments to reduce email size
+# - Priority-based subject lines
+
+# ==============================================================================
+# SEND SCHEDULE CONFIGURATION
+# ==============================================================================
+
+schedule:
+  # Standard send time for daily emails (Santiago timezone)
+  default_send_time: "07:30"
+
+  # Send time for monthly reports (first Tuesday of month)
+  monthly_send_time: "08:00"
+
+  # Send time for quarterly reports (1st and 15th of month)
+  quarterly_send_time: "08:00"
+
+  # Timezone
+  timezone: "America/Santiago"
+
+# ==============================================================================
+# HORIZON FREQUENCY CONFIGURATION
+# ==============================================================================
+
+horizons:
+  7d:
+    frequency: "triweekly"  # Monday, Wednesday, Friday
+    days_of_week: [0, 2, 4]  # 0=Monday, 2=Wednesday, 4=Friday
+    always_include_in: ["weekly_summary"]
+    description: "Short-term forecast for weekly planning"
+
+  15d:
+    frequency: "biweekly"  # Monday, Thursday
+    days_of_week: [0, 3]  # 0=Monday, 3=Thursday
+    always_include_in: ["weekly_summary"]
+    description: "Mid-term forecast for biweekly adjustments"
+
+  30d:
+    frequency: "weekly"  # Friday only
+    days_of_week: [4]  # 4=Friday
+    always_include_in: ["monthly_summary"]
+    description: "Monthly forecast for strategic planning"
+
+  90d:
+    frequency: "bimonthly"  # 1st and 15th of month
+    days_of_month: [1, 15]
+    always_include_in: ["quarterly_summary"]
+    description: "Quarterly forecast for long-term planning"
+
+  12m:
+    frequency: "monthly"  # First Tuesday of month
+    day_of_week: 1  # Tuesday
+    week_of_month: 1  # First week
+    always_include_in: ["annual_summary"]
+    description: "Annual forecast for strategic decisions (post-BCCh meeting)"
+
+# ==============================================================================
+# PDF ATTACHMENT RULES
+# ==============================================================================
+
+pdf_attachment:
+  # Always attach PDF for these horizons (regardless of conditions)
+  always_attach:
+    - "30d"
+    - "90d"
+    - "12m"
+
+  # Conditional attachment rules for short-term horizons (7d, 15d)
+  conditional_rules:
+    # Attach if absolute price change exceeds threshold
+    price_change_threshold: 1.5  # percentage
+
+    # Attach if volatility is high
+    high_volatility: true
+
+    # Attach on Fridays (weekly summary)
+    friday_summary: true
+
+    # Attach if system has critical issues
+    critical_system_issues: true
+
+    # Attach if any of these conditions are met
+    attach_if_any:
+      - significant_price_change  # >1.5%
+      - high_volatility
+      - critical_alert
+      - friday_summary
+      - performance_degradation
+
+# ==============================================================================
+# PRIORITY CLASSIFICATION
+# ==============================================================================
+
+priority:
+  urgent:
+    conditions:
+      - price_change_threshold: 3.0  # >3% change
+      - readiness_level: "NOT_READY"
+      - critical_degradation: true
+    subject_prefix: "🚨 URGENTE"
+
+  attention:
+    conditions:
+      - price_change_threshold: 1.5  # >1.5% change
+      - performance_degradation: true
+      - drift_detected: true
+      - readiness_level: "CAUTIOUS"
+    subject_prefix: "⚠️ ATENCIÓN"
+
+  routine:
+    subject_prefix: "📊"
+
+# ==============================================================================
+# CONTENT CONFIGURATION
+# ==============================================================================
+
+content:
+  # Executive summary configuration
+  executive_summary:
+    max_items: 5
+    include_system_health: true
+    include_alert_count: true
+
+  # Forecast section configuration
+  forecast_sections:
+    show_chart_preview: true  # Inline base64 encoded charts
+    show_top_drivers: true
+    max_drivers: 3
+    show_confidence_intervals: true
+
+  # System health section
+  system_health:
+    show_performance_table: true
+    show_readiness_score: true
+    show_drift_detection: true
+    show_recent_predictions_count: true
+
+  # Recommendations section
+  recommendations:
+    show_by_user_type: true
+    user_types:
+      - "Importadores"
+      - "Exportadores"
+      - "Traders"
+    include_disclaimer: true
+
+# ==============================================================================
+# SPECIAL EVENT TRIGGERS
+# ==============================================================================
+
+special_events:
+  # Send extraordinary report on these triggers
+  extraordinary_triggers:
+    - name: "intraday_movement"
+      threshold: 2.0  # >2% intraday movement
+      send_immediately: true
+
+    - name: "bcch_intervention"
+      detected_by: "alert_system"
+      send_within_hours: 2
+
+    - name: "political_event"
+      detected_by: "news_api"
+      send_same_day: true
+
+    - name: "commodity_shock"
+      threshold: 5.0  # Copper ±5%
+      send_immediately: true
+
+  # Suspend regular emails during these periods
+  suspension_periods:
+    - name: "year_end_holidays"
+      start_date: "12-24"
+      end_date: "12-31"
+      send_only_critical: true
+
+    - name: "easter_week"
+      calculated: "easter"  # Calculated based on year
+      reduce_frequency: true
+      send_only: ["7d", "30d"]  # Reduce to essentials
+
+    - name: "chilean_bank_holidays"
+      check_calendar: true
+      skip_if_holiday: true
+
+# ==============================================================================
+# PERSONALIZATION (Future Implementation)
+# ==============================================================================
+
+personalization:
+  enabled: false  # Set to true when implementing user preferences
+
+  user_segments:
+    traders:
+      primary_horizons: ["7d", "15d"]
+      pdf_preference: "minimal"
+
+    cfos:
+      primary_horizons: ["30d", "90d"]
+      pdf_preference: "always"
+
+    treasurers:
+      primary_horizons: ["7d", "15d", "30d"]
+      pdf_preference: "conditional"
+
+    importers:
+      primary_horizons: ["15d", "30d"]
+      pdf_preference: "conditional"
+
+    exporters:
+      primary_horizons: ["15d", "30d"]
+      pdf_preference: "conditional"
+
+# ==============================================================================
+# MONITORING & OPTIMIZATION
+# ==============================================================================
+
+monitoring:
+  # Track these metrics for optimization
+  track_metrics:
+    - "open_rate"
+    - "click_through_rate"
+    - "time_to_open"
+    - "pdf_download_rate"
+    - "section_expansion_rate"
+
+  # A/B testing configuration (future)
+  ab_testing:
+    enabled: false
+    variants:
+      - "current_strategy"
+      - "alternative_timing"
+      - "different_priority_rules"
+
+  # User feedback
+  quarterly_survey: true
+  feedback_link: true
+
+# ==============================================================================
+# FALLBACK & ERROR HANDLING
+# ==============================================================================
+
+error_handling:
+  # Retry configuration
+  max_retries: 3
+  retry_delay_minutes: 5
+
+  # Fallback behavior if forecast data unavailable
+  missing_forecast_action: "send_with_available_data"
+  include_error_notice: true
+
+  # Log level for email system
+  log_level: "INFO"
+  log_file: "logs/unified_email.log"
