@@ -488,7 +488,7 @@ def generate_forecast(
 
     logger.info(
         f"Forecast generated: {horizon_days} days, "
-        f"Point estimate: {forecast.point_forecast[-1]:.2f} CLP"
+        f"Point estimate: {forecast.ensemble_forecast[-1]:.2f} CLP"
     )
 
     return forecast, metrics
@@ -533,7 +533,7 @@ def detect_market_shocks(
     # Detect shocks
     alerts = detector.detect_shocks(
         current_usdclp=current_usdclp,
-        forecast_usdclp=forecast.point_forecast[-1],
+        forecast_usdclp=forecast.ensemble_forecast[-1],
         copper_price=current_copper,
         vix=current_vix,
         horizon_days=horizon_days,
@@ -602,12 +602,12 @@ def save_results(
         'timestamp': datetime.now().isoformat(),
         'horizon_days': horizon_days,
         'forecast': {
-            'point': forecast.point_forecast.tolist(),
-            'lower_bound': forecast.lower_bound.tolist(),
-            'upper_bound': forecast.upper_bound.tolist(),
+            'point': forecast.ensemble_forecast.tolist(),
+            'lower_bound': forecast.lower_2sigma.tolist(),
+            'upper_bound': forecast.upper_2sigma.tolist(),
             'dates': [d.isoformat() for d in forecast.dates],
         },
-        'weights': forecast.weights,
+        'weights': forecast.weights_used,
         'market_analysis': {
             'severity': market_analysis['severity'],
             'summary': market_analysis['summary'],
@@ -624,9 +624,9 @@ def save_results(
     # Save time series (CSV)
     forecast_df = pd.DataFrame({
         'date': forecast.dates,
-        'point_forecast': forecast.point_forecast,
-        'lower_bound': forecast.lower_bound,
-        'upper_bound': forecast.upper_bound,
+        'point_forecast': forecast.ensemble_forecast,
+        'lower_bound': forecast.lower_2sigma,
+        'upper_bound': forecast.upper_2sigma,
     })
 
     csv_path = OUTPUT_DIR / f"{prefix}.csv"
@@ -683,10 +683,10 @@ def send_forecast_email(
     # Prepare data for email script
     email_data = {
         'horizon_days': horizon_days,
-        'current_rate': float(forecast.point_forecast[0]),
-        'forecast_rate': float(forecast.point_forecast[-1]),
-        'lower_bound': float(forecast.lower_bound[-1]),
-        'upper_bound': float(forecast.upper_bound[-1]),
+        'current_rate': float(forecast.ensemble_forecast[0]),
+        'forecast_rate': float(forecast.ensemble_forecast[-1]),
+        'lower_bound': float(forecast.lower_2sigma[-1]),
+        'upper_bound': float(forecast.upper_2sigma[-1]),
         'severity': market_analysis['severity'],
         'alert_summary': market_analysis['summary'],
         'timestamp': datetime.now().isoformat(),
@@ -857,8 +857,8 @@ def main():
             f"{'='*60}\n"
             f"Horizon: {args.horizon} days\n"
             f"Current rate: {features_df['usdclp'].iloc[-1]:.2f} CLP\n"
-            f"Forecast: {forecast.point_forecast[-1]:.2f} CLP\n"
-            f"Range: [{forecast.lower_bound[-1]:.2f}, {forecast.upper_bound[-1]:.2f}]\n"
+            f"Forecast: {forecast.ensemble_forecast[-1]:.2f} CLP\n"
+            f"Range: [{forecast.lower_2sigma[-1]:.2f}, {forecast.upper_2sigma[-1]:.2f}]\n"
             f"Market condition: {market_analysis['severity']}\n"
             f"Results: {results_path}\n"
             f"{'='*60}"
