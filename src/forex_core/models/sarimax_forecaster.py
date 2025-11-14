@@ -622,7 +622,12 @@ class SARIMAXForecaster:
                 upper_bound = None
 
             # Create result DataFrame
-            last_date = self.model.data.dates[-1] if hasattr(self.model.data, 'dates') else datetime.now()
+            # Check if model has data with dates, otherwise use current date
+            if hasattr(self.model, 'data') and self.model.data is not None and hasattr(self.model.data, 'dates'):
+                last_date = self.model.data.dates[-1]
+            else:
+                last_date = datetime.now()
+
             forecast_dates = pd.date_range(
                 start=last_date + timedelta(days=1),
                 periods=steps,
