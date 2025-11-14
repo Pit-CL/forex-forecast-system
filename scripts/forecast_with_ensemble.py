@@ -451,6 +451,9 @@ def generate_forecast(
         horizon_days=horizon_days,
     )
 
+    # Determine model path
+    model_path = MODELS_DIR / f"ensemble_{horizon_days}d"
+
     # Train or load models
     if train_models:
         logger.info("Training new ensemble models...")
@@ -463,7 +466,7 @@ def generate_forecast(
     else:
         # Try to load existing models
         try:
-            forecaster.load_models()
+            forecaster.load_models(model_path)
             logger.info("Loaded existing models")
         except FileNotFoundError:
             logger.warning("Models not found - training new models...")
