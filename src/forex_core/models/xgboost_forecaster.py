@@ -457,8 +457,18 @@ class XGBoostForecaster:
         # Create target (shifted by horizon)
         target = data[target_col].shift(-self.config.horizon_days)
 
+        # IMPORTANT: Convert target to log returns for stationarity
+        # This prevents the model from learning absolute levels and regressing to historical mean
+        # Instead, it learns relative changes which better capture trends
+        current_values = data[target_col]
+        log_returns = np.log(target / current_values)
+
+        # Store the last known value for reconstruction during prediction
+        self.last_known_value = data[target_col].iloc[-1]
+        logger.info(f"Using log returns as target. Last known value: {self.last_known_value:.2f}")
+
         # Combine and drop NaN
-        combined = pd.concat([features, target.rename('target')], axis=1).dropna()
+        combined = pd.concat([features, log_returns.rename('target')], axis=1).dropna()
 
         # Store feature names
         self.feature_names = [col for col in combined.columns if col != 'target']
@@ -476,6 +486,7 @@ class XGBoostForecaster:
 
         logger.info(f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
         logger.info(f"Number of features: {len(self.feature_names)}")
+        logger.info(f"Target transformed to log returns (mean: {y_train.mean():.6f}, std: {y_train.std():.6f})")
 
         return X_train, y_train, X_val, y_val
 
@@ -531,9 +542,10 @@ class XGBoostForecaster:
             X_train_scaled = self.feature_scaler.fit_transform(X_train)
             X_val_scaled = self.feature_scaler.transform(X_val)
 
-            # Scale target (helps with convergence)
-            y_train_scaled = self.target_scaler.fit_transform(y_train.values.reshape(-1, 1)).ravel()
-            y_val_scaled = self.target_scaler.transform(y_val.values.reshape(-1, 1)).ravel()
+            # NO scaling needed for target - log returns are already naturally normalized
+            # This prevents the regression-to-mean problem we had with StandardScaler
+            y_train_scaled = y_train.values
+            y_val_scaled = y_val.values
 
             # Initialize model
             self.model = xgb.XGBRegressor(
@@ -562,8 +574,8 @@ class XGBoostForecaster:
             )
 
             # Make predictions on validation set
-            y_pred_scaled = self.model.predict(X_val_scaled)
-            y_pred = self.target_scaler.inverse_transform(y_pred_scaled.reshape(-1, 1)).ravel()
+            # Predictions are log returns, no need for inverse_transform
+            y_pred = self.model.predict(X_val_scaled)
 
             # Calculate metrics
             metrics = self.evaluate(y_val.values, y_pred, len(X_train), len(X_val))
@@ -621,9 +633,17 @@ class XGBoostForecaster:
             # Scale features
             X_scaled = self.feature_scaler.transform(X)
 
-            # Generate prediction
-            y_pred_scaled = self.model.predict(X_scaled)
-            y_pred = self.target_scaler.inverse_transform(y_pred_scaled.reshape(-1, 1)).ravel()
+            # Generate prediction (log return)
+            log_return_pred = self.model.predict(X_scaled)[0]
+
+            # Reconstruct absolute value from log return
+            # Formula: future_value = last_known_value * exp(log_return)
+            last_value = data[target_col].iloc[-1]
+            forecast_value = last_value * np.exp(log_return_pred)
+
+            logger.info(f"Predicted log return: {log_return_pred:.6f}")
+            logger.info(f"Last known value: {last_value:.2f}")
+            logger.info(f"Reconstructed forecast: {forecast_value:.2f} CLP")
 
             # Create forecast DataFrame
             last_date = data.index[-1]
@@ -635,14 +655,14 @@ class XGBoostForecaster:
 
             # For multi-step, repeat the prediction (simple approach)
             # More sophisticated: use recursive forecasting or direct multi-output
-            predictions = np.repeat(y_pred[0], steps)
+            predictions = np.repeat(forecast_value, steps)
 
             result = pd.DataFrame({
                 'date': forecast_dates,
                 'forecast': predictions
             }).set_index('date')
 
-            logger.info(f"Generated {steps}-step forecast: {y_pred[0]:.2f} CLP")
+            logger.info(f"Generated {steps}-step forecast: {forecast_value:.2f} CLP")
 
             return result
 
