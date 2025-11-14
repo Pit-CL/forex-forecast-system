@@ -530,8 +530,12 @@ def detect_market_shocks(
     # date, usdclp, copper_price, dxy, vix, tpm (optional)
     # Reset index to make 'date' a column if it's currently the index
     detection_df = features_df.copy()
-    if 'date' not in detection_df.columns and detection_df.index.name is not None:
+    if 'date' not in detection_df.columns:
+        # Index is the date, reset to make it a column
         detection_df = detection_df.reset_index()
+        # If reset_index created 'index' column instead of 'date', rename it
+        if 'index' in detection_df.columns:
+            detection_df = detection_df.rename(columns={'index': 'date'})
 
     alerts = detector.detect_all(detection_df)
 
