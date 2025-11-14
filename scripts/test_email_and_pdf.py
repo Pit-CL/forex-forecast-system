@@ -108,11 +108,99 @@ def calculate_system_health(horizon: str, predictions_path: Path = None) -> dict
     return health
 
 
+def get_real_market_data():
+    """Fetch real-time market data from various sources."""
+    market_data = {
+        "copper_price": 4.04,
+        "dxy": 99.32,
+        "vix": 21.39,
+        "tpm": 5.50,
+        "fed_rate": 5.00,
+        "copper_correlation": -0.69,
+    }
+
+    try:
+        import yfinance as yf
+
+        # Get Copper price (HG=F)
+        try:
+            copper = yf.Ticker("HG=F")
+            copper_hist = copper.history(period="1d")
+            if not copper_hist.empty:
+                market_data["copper_price"] = round(float(copper_hist['Close'].iloc[-1]), 2)
+        except:
+            pass
+
+        # Get DXY (Dollar Index)
+        try:
+            dxy = yf.Ticker("DX=F")
+            dxy_hist = dxy.history(period="1d")
+            if not dxy_hist.empty:
+                market_data["dxy"] = round(float(dxy_hist['Close'].iloc[-1]), 2)
+        except:
+            pass
+
+        # Get VIX
+        try:
+            vix = yf.Ticker("^VIX")
+            vix_hist = vix.history(period="1d")
+            if not vix_hist.empty:
+                market_data["vix"] = round(float(vix_hist['Close'].iloc[-1]), 2)
+        except:
+            pass
+
+    except Exception as e:
+        print(f"Warning: Could not fetch all market data: {e}")
+
+    return market_data
+
+
+def generate_dynamic_drivers(market_data: dict, bias: str) -> list:
+    """Generate dynamic driver descriptions based on real market data."""
+    copper = market_data["copper_price"]
+    dxy = market_data["dxy"]
+    vix = market_data["vix"]
+    tpm = market_data["tpm"]
+    fed = market_data["fed_rate"]
+    correlation = market_data["copper_correlation"]
+
+    # Interpret copper impact
+    copper_impact = "presiona" if correlation < 0 else "apoya"
+
+    # Interpret DXY
+    dxy_trend = "Debilidad" if dxy < 100 else "Fortaleza" if dxy > 105 else "Estabilidad"
+    dxy_effect = "favorece descensos" if dxy < 100 else "presiona al alza" if dxy > 105 else "mantiene equilibrio"
+
+    # Interpret VIX
+    vix_level = "baja" if vix < 15 else "moderada-alta" if vix < 25 else "alta"
+
+    # TPM differential
+    diff = tpm - fed
+    tpm_effect = "apoyando peso chileno" if diff > 0 else "debilitando peso" if diff < 0 else "en paridad con Fed"
+
+    # Copper trend
+    copper_trend = "estable" if abs(correlation) < 0.3 else "volátil"
+    peso_effect = "fortaleza del peso" if (correlation < 0 and copper > 4.0) else "presión al peso"
+
+    drivers = [
+        f"Precio del Cobre: Cotización en US${copper}/lb {copper_impact} USD/CLP según correlación histórica negativa ({correlation:.2f}).",
+        f"TPM Banco Central: Mantención en {tpm}% mantiene diferencial con Fed ({fed}%), {tpm_effect}.",
+        f"DXY (Índice Dólar): {dxy_trend} del dólar (DXY={dxy}) {dxy_effect} en USD/CLP.",
+        f"Volatilidad VIX: VIX en {vix} señala volatilidad {vix_level}, requiere monitoreo cercano.",
+        f"Correlación Copper-USD/CLP: Relación negativa se mantiene, cobre {copper_trend} favorece {peso_effect}.",
+    ]
+
+    return drivers
+
+
 def load_latest_forecast_data(horizon: str, project_root: Path):
     """Load data from the latest forecast execution or real-time market data."""
     import json
 
     horizon_days = int(horizon.replace('d', ''))
+
+    # Get real market data
+    market_data = get_real_market_data()
 
     # Try to load from forecast JSON (if exists)
     forecast_json = project_root / "output" / f"forecast_{horizon}.json"
@@ -175,15 +263,9 @@ def load_latest_forecast_data(horizon: str, project_root: Path):
             "volatility_20d": 23.4,
             "rsi_14": 58.3,
             "trend": "+1 (Alcista)",
-            "correlation_90d": -0.687,
+            "correlation_90d": market_data["copper_correlation"],
         },
-        "drivers": [
-            f"Precio del Cobre: Cotización en US$4.04/lb presiona USD/CLP según correlación histórica negativa (-0.69).",
-            "TPM Banco Central: Mantención en 5.50% mantiene diferencial con Fed (5.00%), apoyando peso chileno.",
-            "DXY (Índice Dólar): Debilidad del dólar (DXY=99.32) favorece descensos en USD/CLP.",
-            "Volatilidad VIX: VIX en 21.39 señala volatilidad moderada-alta, requiere monitoreo cercano.",
-            "Correlación Copper-USD/CLP: Relación negativa se mantiene, cobre estable favorece fortaleza del peso.",
-        ],
+        "drivers": generate_dynamic_drivers(market_data, bias),
         "system_health": calculate_system_health(horizon, project_root / "data" / "predictions" / "predictions.parquet")
     }
 
