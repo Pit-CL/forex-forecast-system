@@ -527,8 +527,13 @@ def detect_market_shocks(
 
     # Detect shocks using the features DataFrame
     # MarketShockDetector.detect_all() expects a DataFrame with columns:
-    # usdclp, copper_price, dxy, vix, tpm (optional)
-    alerts = detector.detect_all(features_df)
+    # date, usdclp, copper_price, dxy, vix, tpm (optional)
+    # Reset index to make 'date' a column if it's currently the index
+    detection_df = features_df.copy()
+    if 'date' not in detection_df.columns and detection_df.index.name is not None:
+        detection_df = detection_df.reset_index()
+
+    alerts = detector.detect_all(detection_df)
 
     # Determine overall severity
     if alerts:
