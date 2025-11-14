@@ -155,6 +155,153 @@ def get_real_market_data():
     return market_data
 
 
+def get_copper_features() -> dict:
+    """Calculate real-time copper technical features from market data."""
+    try:
+        import yfinance as yf
+        import pandas as pd
+
+        # Get copper futures data (HG=F)
+        copper = yf.Ticker("HG=F")
+        hist = copper.history(period="90d")
+
+        if hist.empty:
+            raise ValueError("No copper data available")
+
+        # Calculate features
+        current_price = float(hist['Close'].iloc[-1])
+        prev_price = float(hist['Close'].iloc[-2])
+        return_1d = ((current_price - prev_price) / prev_price) * 100
+
+        # 20-day volatility (annualized)
+        returns_20d = hist['Close'].tail(20).pct_change().dropna()
+        volatility_20d = returns_20d.std() * (252 ** 0.5) * 100
+
+        # RSI calculation (14-day)
+        delta = hist['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        rsi_14 = 100 - (100 / (1 + rs.iloc[-1]))
+
+        # Trend (SMA comparison)
+        sma_20 = hist['Close'].tail(20).mean()
+        sma_50 = hist['Close'].tail(50).mean()
+        trend_value = 1 if sma_20 > sma_50 else -1
+        trend_text = "+1 (Alcista)" if trend_value > 0 else "-1 (Bajista)"
+
+        # 90-day correlation with USD/CLP
+        try:
+            usdclp = yf.Ticker("CLP=X")
+            usdclp_hist = usdclp.history(period="90d")
+            if len(usdclp_hist) >= 30 and len(hist) >= 30:
+                # Align dates
+                merged = pd.merge(
+                    hist[['Close']].rename(columns={'Close': 'copper'}),
+                    usdclp_hist[['Close']].rename(columns={'Close': 'usdclp'}),
+                    left_index=True,
+                    right_index=True,
+                    how='inner'
+                )
+                if len(merged) >= 30:
+                    correlation_90d = merged['copper'].corr(merged['usdclp'])
+                else:
+                    correlation_90d = -0.69
+            else:
+                correlation_90d = -0.69
+        except:
+            correlation_90d = -0.69
+
+        return {
+            "return_1d": return_1d,
+            "volatility_20d": volatility_20d,
+            "rsi_14": rsi_14,
+            "trend": trend_text,
+            "trend_value": trend_value,
+            "correlation_90d": correlation_90d,
+            "current_price": current_price,
+        }
+
+    except Exception as e:
+        print(f"Warning: Could not calculate copper features: {e}")
+        # Fallback to reasonable defaults
+        return {
+            "return_1d": 0.5,
+            "volatility_20d": 23.4,
+            "rsi_14": 58.3,
+            "trend": "+1 (Alcista)",
+            "trend_value": 1,
+            "correlation_90d": -0.69,
+            "current_price": 4.04,
+        }
+
+
+def interpret_copper_impacts(copper_features: dict) -> dict:
+    """Generate dynamic interpretations for copper features based on their values."""
+    return_1d = copper_features["return_1d"]
+    volatility_20d = copper_features["volatility_20d"]
+    rsi_14 = copper_features["rsi_14"]
+    trend_value = copper_features["trend_value"]
+    correlation_90d = copper_features["correlation_90d"]
+
+    # Interpret return_1d
+    if correlation_90d < 0:  # Negative correlation (normal case)
+        if return_1d > 0:
+            return_impact = "Positivo para CLP (presión bajista USD/CLP)"
+        else:
+            return_impact = "Negativo para CLP (presión alcista USD/CLP)"
+    else:  # Positive correlation (unusual)
+        if return_1d > 0:
+            return_impact = "Negativo para CLP (correlación positiva)"
+        else:
+            return_impact = "Positivo para CLP (correlación positiva)"
+
+    # Interpret volatility
+    if volatility_20d < 20:
+        volatility_impact = "Baja (favorece estabilidad)"
+    elif volatility_20d < 30:
+        volatility_impact = "Moderada (monitoreo normal)"
+    else:
+        volatility_impact = "Alta (requiere atención)"
+
+    # Interpret RSI
+    if rsi_14 < 30:
+        rsi_impact = "Sobreventa (rebote probable)"
+    elif rsi_14 < 45:
+        rsi_impact = "Bajista"
+    elif rsi_14 < 55:
+        rsi_impact = "Neutral"
+    elif rsi_14 < 70:
+        rsi_impact = "Alcista"
+    else:
+        rsi_impact = "Sobrecompra (corrección probable)"
+
+    # Interpret trend
+    if trend_value > 0:
+        trend_impact = "SMA20 > SMA50 (tendencia alcista)"
+    else:
+        trend_impact = "SMA20 < SMA50 (tendencia bajista)"
+
+    # Interpret correlation
+    if abs(correlation_90d) > 0.6:
+        if correlation_90d < 0:
+            correlation_impact = "Correlación negativa fuerte esperada"
+        else:
+            correlation_impact = "Correlación positiva fuerte (inusual)"
+    elif abs(correlation_90d) > 0.3:
+        correlation_impact = "Correlación moderada"
+    else:
+        correlation_impact = "Correlación débil (poca influencia)"
+
+    return {
+        "return_1d": return_impact,
+        "volatility_20d": volatility_impact,
+        "rsi_14": rsi_impact,
+        "trend": trend_impact,
+        "correlation_90d": correlation_impact,
+    }
+
+
 def generate_dynamic_drivers(market_data: dict, bias: str) -> list:
     """Generate dynamic driver descriptions based on real market data."""
     copper = market_data["copper_price"]
@@ -245,6 +392,10 @@ def load_latest_forecast_data(horizon: str, project_root: Path):
     change_pct = ((forecast_price - current_price) / current_price * 100)
     bias = "ALCISTA" if change_pct > 0 else "BAJISTA"
 
+    # Get real-time copper features
+    copper_features = get_copper_features()
+    copper_impacts = interpret_copper_impacts(copper_features)
+
     data = {
         "horizon": horizon,
         "horizon_days": horizon_days,
@@ -258,13 +409,8 @@ def load_latest_forecast_data(horizon: str, project_root: Path):
         "ci95_high": ci95_high,
         "ci80_low": current_price * 0.993,
         "ci80_high": current_price * 1.012,
-        "copper_features": {
-            "return_1d": 0.8,
-            "volatility_20d": 23.4,
-            "rsi_14": 58.3,
-            "trend": "+1 (Alcista)",
-            "correlation_90d": market_data["copper_correlation"],
-        },
+        "copper_features": copper_features,
+        "copper_impacts": copper_impacts,
         "drivers": generate_dynamic_drivers(market_data, bias),
         "system_health": calculate_system_health(horizon, project_root / "data" / "predictions" / "predictions.parquet")
     }
@@ -600,27 +746,27 @@ def generate_email_html(data: dict, chart_base64: str) -> str:
                     <tr>
                         <td>Retorno Cobre 1d</td>
                         <td>{data['copper_features']['return_1d']:+.1f}%</td>
-                        <td>Positivo para CLP</td>
+                        <td>{data['copper_impacts']['return_1d']}</td>
                     </tr>
                     <tr>
                         <td>Volatilidad Cobre 20d</td>
                         <td>{data['copper_features']['volatility_20d']:.1f}% (anualizada)</td>
-                        <td>Moderada</td>
+                        <td>{data['copper_impacts']['volatility_20d']}</td>
                     </tr>
                     <tr>
                         <td>RSI Cobre 14</td>
                         <td>{data['copper_features']['rsi_14']:.1f}</td>
-                        <td>Neutral</td>
+                        <td>{data['copper_impacts']['rsi_14']}</td>
                     </tr>
                     <tr>
                         <td>Tendencia Cobre</td>
                         <td>{data['copper_features']['trend']}</td>
-                        <td>SMA20 > SMA50</td>
+                        <td>{data['copper_impacts']['trend']}</td>
                     </tr>
                     <tr>
                         <td>Correlación Cobre-USD/CLP 90d</td>
                         <td>{data['copper_features']['correlation_90d']:.3f}</td>
-                        <td>Correlación negativa esperada</td>
+                        <td>{data['copper_impacts']['correlation_90d']}</td>
                     </tr>
                 </tbody>
             </table>
@@ -917,27 +1063,27 @@ def generate_pdf_html(data: dict) -> str:
                 <tr>
                     <td>Retorno Cobre 1d</td>
                     <td>{data['copper_features']['return_1d']:+.1f}%</td>
-                    <td>Positivo para CLP</td>
+                    <td>{data['copper_impacts']['return_1d']}</td>
                 </tr>
                 <tr>
                     <td>Volatilidad Cobre 20d</td>
                     <td>{data['copper_features']['volatility_20d']:.1f}% (anualizada)</td>
-                    <td>Moderada</td>
+                    <td>{data['copper_impacts']['volatility_20d']}</td>
                 </tr>
                 <tr>
                     <td>RSI Cobre 14</td>
                     <td>{data['copper_features']['rsi_14']:.1f}</td>
-                    <td>Neutral</td>
+                    <td>{data['copper_impacts']['rsi_14']}</td>
                 </tr>
                 <tr>
                     <td>Tendencia Cobre</td>
                     <td>{data['copper_features']['trend']}</td>
-                    <td>SMA20 > SMA50</td>
+                    <td>{data['copper_impacts']['trend']}</td>
                 </tr>
                 <tr>
                     <td>Correlación Cobre-USD/CLP 90d</td>
                     <td>{data['copper_features']['correlation_90d']:.3f}</td>
-                    <td>Correlación negativa esperada</td>
+                    <td>{data['copper_impacts']['correlation_90d']}</td>
                 </tr>
             </tbody>
         </table>
