@@ -446,9 +446,15 @@ def generate_forecast(
     if verbose:
         logger.info(f"Initializing ensemble forecaster (horizon={horizon_days}d)...")
 
-    # Initialize ensemble
+    # Initialize ensemble with univariate SARIMAX (no exogenous variables)
+    # Create custom SARIMAX config with empty exog_vars to force univariate
+    from forex_core.models.sarimax_forecaster import SARIMAXConfig
+    sarimax_config = SARIMAXConfig.from_horizon(horizon_days)
+    sarimax_config.exog_vars = []  # Force univariate - no exogenous variables
+
     forecaster = EnsembleForecaster(
         horizon_days=horizon_days,
+        sarimax_config=sarimax_config,
     )
 
     # Determine model path
