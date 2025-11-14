@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import List
-import xml.etree.ElementTree as ET
+
+# Use defusedxml to prevent XXE (XML External Entity) attacks
+import defusedxml.ElementTree as ET
 
 import httpx
 from loguru import logger
@@ -37,10 +39,16 @@ class RSSNewsClient:
 
     # Public RSS feeds (no authentication required)
     RSS_FEEDS = [
-        "https://www.df.cl/rss/",  # Diario Financiero
-        "https://www.latercera.com/feed/",  # La Tercera
+        # Chilean Financial & Economic News
+        "https://www.df.cl/rss/",  # Diario Financiero (primary financial source)
+        "https://www.latercera.com/feed/",  # La Tercera (general + economic)
         "https://www.emol.com/rss/economia.xml",  # Emol Economía
         "https://www.biobiochile.cl/lista/economia/rss",  # BioBio Economía
+
+        # Additional Chilean Economic Sources
+        "https://www.pulso.cl/feed/",  # Pulso (business & finance)
+        "https://www.elmostrador.cl/mercados/feed/",  # El Mostrador Mercados
+        "https://www.cnnchile.com/feed/",  # CNN Chile (economic coverage)
     ]
 
     def __init__(self) -> None:
@@ -205,6 +213,12 @@ class RSSNewsClient:
             return "Emol"
         elif "biobio" in feed_url:
             return "BioBioChile"
+        elif "pulso" in feed_url:
+            return "Pulso"
+        elif "elmostrador" in feed_url:
+            return "El Mostrador"
+        elif "cnn" in feed_url:
+            return "CNN Chile"
         else:
             return "RSS Feed"
 
@@ -219,12 +233,31 @@ class RSSNewsClient:
             Filtered list of relevant headlines.
         """
         keywords = {
-            "dólar", "peso", "tipo de cambio", "usd", "clp", "divisa",
-            "banco central", "bccch", "tpm", "inflación", "ipc",
-            "cobre", "copper", "codelco", "cochilco",
-            "economía", "pib", "crecimiento", "recesión",
-            "fed", "fomc", "tasas", "interés",
-            "comercio", "exportación", "balanza",
+            # Foreign Exchange & Currency
+            "dólar", "peso", "tipo de cambio", "usd", "clp", "divisa", "forex",
+
+            # Central Bank & Monetary Policy
+            "banco central", "bccch", "bch", "tpm", "política monetaria", "rpm",
+            "rosanna costa", "consejo banco central",
+
+            # Inflation & Economic Indicators
+            "inflación", "ipc", "índice de precios", "ine", "imacec", "pib",
+            "crecimiento", "recesión", "actividad económica",
+
+            # Commodities (Chile-specific)
+            "cobre", "copper", "codelco", "cochilco", "minería", "litio",
+            "molibdeno", "celulosa", "salmón",
+
+            # Fiscal Policy
+            "hacienda", "ministerio de hacienda", "fisco", "déficit fiscal",
+            "presupuesto", "marcel", "deuda pública",
+
+            # International Factors
+            "fed", "fomc", "tasas", "interés", "reserva federal",
+
+            # Trade & Balance
+            "comercio", "exportación", "importación", "balanza", "aduanas",
+            "svs", "cmf", "afp",
         }
 
         relevant = []

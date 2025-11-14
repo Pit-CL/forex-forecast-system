@@ -23,6 +23,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import List, Optional
 import time
+import threading
 
 from loguru import logger
 
@@ -64,6 +65,8 @@ class NewsAggregator:
         self._init_providers()
         self._cache: Optional[tuple[List[NewsHeadline], datetime]] = None
         self._cache_ttl_hours = 6  # Cache for 6 hours
+        self._cache_max_headlines = 50  # Limit cache size to prevent memory leaks
+        self._cache_lock = threading.RLock()  # Reentrant lock for thread-safe cache access
 
     def _init_providers(self) -> None:
         """Initialize all available news providers."""
@@ -138,10 +141,12 @@ class NewsAggregator:
             ... else:
             ...     print("No news available, continuing without")
         """
-        # Check cache first
-        if use_cache and self._is_cache_valid():
-            logger.info(f"Using cached news data ({len(self._cache[0])} headlines)")
-            return self._cache[0]
+        # Check cache first (thread-safe)
+        with self._cache_lock:
+            if use_cache and self._is_cache_valid():
+                logger.info(f"Using cached news data ({len(self._cache[0])} headlines)")
+                # Return copy to prevent external mutations
+                return self._cache[0].copy()
 
         if not self.providers:
             logger.warning("No news providers available, returning empty list")
@@ -164,8 +169,11 @@ class NewsAggregator:
                 logger.info(
                     f"✓ Successfully fetched {len(headlines)} headlines from {provider_name}"
                 )
-                # Cache successful result
-                self._cache = (headlines, datetime.utcnow())
+                # Cache successful result (limited to prevent memory leaks, thread-safe)
+                cached_headlines = headlines[:self._cache_max_headlines]
+                with self._cache_lock:
+                    self._cache = (cached_headlines, datetime.utcnow())
+                logger.debug(f"Cached {len(cached_headlines)} headlines (max: {self._cache_max_headlines})")
                 return headlines
             else:
                 logger.warning(f"✗ {provider_name} returned no headlines, trying next provider...")

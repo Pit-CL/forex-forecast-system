@@ -97,7 +97,7 @@ Archivo: /var/spool/cron/crontabs/root
 
 | Horario | Frecuencia | Comando | Propósito |
 |---------|-----------|---------|-----------|
-| **10:00** | Día 1 trimestral (Ene/Abr/Jul/Oct) | `python -m services.forecaster_90d.cli run` | Generar pronóstico 90 días |
+| **10:00** | Día 30 trimestral (Ene/Abr/Jul/Oct) | `python -m services.forecaster_90d.cli run` | Generar pronóstico 90 días (2 días post-BCCh) |
 | **XX:00** | Cada hora | `date > /tmp/healthcheck` | Health check del container |
 
 **Output:** `/var/log/cron.log` (dentro del container)
@@ -189,9 +189,18 @@ Archivo: /var/spool/cron/crontabs/root
 09:00 - 🔮 Pronóstico 15d (quincenal)
 09:30 - 🔮 Pronóstico 30d (mensual)
 10:00 - Performance check
+```
 
-Si además es Enero/Abril/Julio/Octubre:
-10:00 - 🔮 Pronóstico 90d (trimestral)
+### Día 30 de Meses Trimestrales (Ene/Abr/Jul/Oct)
+```
+(Cronograma normal del día de la semana)
+10:00 - 🔮 Pronóstico 90d (2 días después de RPM BCCh)
+
+Nota: Alineado con calendario oficial BCCh 2025:
+- Enero 30 (post reunión 27-28)
+- Abril 30 (post reunión 28-29)
+- Julio 30 (post reunión 28-29)
+- Octubre 30 (post reunión 27-28)
 ```
 
 ### Día 15 del Mes
