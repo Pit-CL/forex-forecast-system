@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 
 # Copy cron configuration
 COPY cron/30d/crontab /etc/cron.d/usdclp-30d
