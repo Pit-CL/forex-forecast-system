@@ -93,7 +93,7 @@ def engineer_features(df: pd.DataFrame, horizon: int = 7) -> pd.DataFrame:
 
     # Apply feature engineering steps
     logger.info("Adding lagged features...")
-    features = add_lagged_features(features)
+    features = add_lagged_features(features, horizon=horizon)
 
     logger.info("Adding technical indicators...")
     features = add_technical_indicators(features)
@@ -123,18 +123,19 @@ def engineer_features(df: pd.DataFrame, horizon: int = 7) -> pd.DataFrame:
     return features
 
 
-def add_lagged_features(df: pd.DataFrame) -> pd.DataFrame:
+def add_lagged_features(df: pd.DataFrame, horizon: int = 7) -> pd.DataFrame:
     """
-    Add lagged features for time series forecasting.
+    Add lagged features for time series forecasting with horizon-aware safety margins.
 
-    Creates 20 lagged features:
-        - USD/CLP: 1, 2, 3, 5, 7, 14, 21, 30 day lags
+    Creates lagged features with horizon-specific adjustments to prevent data leakage:
+        - USD/CLP: 1, 2, 3, 5, 7, 14, 21, 30 day lags (adjusted for 30d horizon)
         - Copper: 1, 3, 7, 14 day lags
         - DXY: 1, 3, 7 day lags
         - VIX: 1, 3 day lags
 
     Args:
         df: DataFrame with usdclp, copper_price, dxy, vix columns
+        horizon: Forecast horizon in days (7, 15, 30, 90) to adjust max lags
 
     Returns:
         DataFrame with added lag features
@@ -144,13 +145,21 @@ def add_lagged_features(df: pd.DataFrame) -> pd.DataFrame:
         ...     'usdclp': [900, 905, 910],
         ...     'copper_price': [4.0, 4.1, 4.05]
         ... })
-        >>> df = add_lagged_features(df)
+        >>> df = add_lagged_features(df, horizon=30)
         >>> print(df[['usdclp_lag1', 'copper_lag1']])
     """
     result = df.copy()
 
     # USD/CLP lags (most important)
+    # Base lags for most horizons
     usdclp_lags = [1, 2, 3, 5, 7, 14, 21, 30]
+
+    # For 30d horizon, remove 30-day lag to prevent boundary issues
+    # This ensures a safety margin between max feature lag (21 days) and target shift (30 days)
+    if horizon == 30:
+        usdclp_lags = [1, 2, 3, 5, 7, 14, 21]  # Max lag: 21 days
+        logger.info(f"30d horizon: Using max lag of 21 days (safety margin to prevent data leakage)")
+
     for lag in usdclp_lags:
         result[f'usdclp_lag{lag}'] = result['usdclp'].shift(lag)
 

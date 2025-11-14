@@ -5,7 +5,7 @@
 0 7 * * 1,3,5 cd /app && PYTHONPATH=/app/src python /app/scripts/forecast_with_ensemble.py --horizon 7 >> /var/log/cron.log 2>&1
 
 # Email dispatch: 7:30 AM after forecast completes
-30 7 * * 1,3,5 cd /app && PYTHONPATH=/app/src python /app/scripts/send_daily_email.sh --horizon 7d >> /var/log/cron.log 2>&1
+30 7 * * 1,3,5 cd /app && PYTHONPATH=/app/src python /app/scripts/test_email_and_pdf.py --horizon 7d >> /var/log/cron.log 2>&1
 
 # Weekly XGBoost re-training - Sunday 00:00 Chile (03:00 UTC)
 0 3 * * 0 cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_xgboost.py --horizon 7 >> /var/log/cron.log 2>&1

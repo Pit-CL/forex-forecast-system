@@ -95,22 +95,36 @@ logging.basicConfig(
 
 # Constants
 DEFAULT_HORIZONS = [7, 15, 30, 90]
-TRAINING_WINDOW_DAYS = 180
+
+# Horizon-specific training windows to ensure adequate sample sizes
+# Short-term forecasts (7d, 15d) use 6 months, medium-term (30d) uses 1 year,
+# Long-term (90d) uses 18 months for better seasonal pattern capture
+TRAINING_WINDOWS = {
+    7: 180,   # 6 months for short-term
+    15: 270,  # 9 months for medium-term
+    30: 365,  # 1 year for monthly forecasts
+    90: 540,  # 18 months for quarterly forecasts
+}
+
+# Default fallback if horizon not in dictionary
+DEFAULT_TRAINING_WINDOW = 180
+
 OPTUNA_N_TRIALS = 50
 OPTUNA_N_TRIALS_FAST = 10
 WALK_FORWARD_SPLITS = 5
-MIN_TRAIN_SIZE = 120  # Minimum 4 months of data
+MIN_TRAIN_SIZE = 80  # Reduced from 120 to enable 80% walk-forward validation coverage
 
 # Model save directory
 MODELS_DIR = Path("/app/models")
 
 
-def load_training_data(days: int = TRAINING_WINDOW_DAYS) -> pd.DataFrame:
+def load_training_data(horizon: int = 7, days: Optional[int] = None) -> pd.DataFrame:
     """
     Load last N days of data from warehouse with all required features.
 
     Args:
-        days: Number of days of history to load
+        horizon: Forecast horizon to determine optimal training window
+        days: Number of days of history to load (overrides horizon-based selection)
 
     Returns:
         DataFrame with columns: date, usdclp, copper_price, dxy, vix, tpm, fed_funds
@@ -119,7 +133,11 @@ def load_training_data(days: int = TRAINING_WINDOW_DAYS) -> pd.DataFrame:
         ValueError: If insufficient data available
         RuntimeError: If data loading fails
     """
-    logger.info(f"Loading last {days} days of training data...")
+    # Use horizon-specific training window if days not specified
+    if days is None:
+        days = TRAINING_WINDOWS.get(horizon, DEFAULT_TRAINING_WINDOW)
+
+    logger.info(f"Loading last {days} days of training data for {horizon}d horizon...")
 
     try:
         settings = get_settings()
@@ -537,7 +555,7 @@ def save_model_with_metadata(
         "optimization_time_seconds": optimization_time,
         "baseline_comparison": baseline_comparison,
         "trained_at": datetime.now().isoformat(),
-        "training_window_days": TRAINING_WINDOW_DAYS,
+        "training_window_days": TRAINING_WINDOWS.get(horizon, DEFAULT_TRAINING_WINDOW),
         "optuna_trials": OPTUNA_N_TRIALS,
         "model_version": "1.0.0",
     }
@@ -660,7 +678,7 @@ def retrain_horizon(
     try:
         # Step 1: Load training data
         logger.info("Step 1/6: Loading training data")
-        data = load_training_data(days=TRAINING_WINDOW_DAYS)
+        data = load_training_data(horizon=horizon)
 
         # Check data quality
         missing_pct = data.isna().sum().sum() / (len(data) * len(data.columns))
@@ -871,7 +889,7 @@ Scheduled via cron:
     logger.info(f"Fast mode: {args.fast}")
     logger.info(f"Dry run: {args.dry_run}")
     logger.info(f"Optuna trials: {OPTUNA_N_TRIALS_FAST if args.fast else OPTUNA_N_TRIALS}")
-    logger.info(f"Training window: {TRAINING_WINDOW_DAYS} days")
+    logger.info(f"Training windows: {', '.join([f'{h}d:{TRAINING_WINDOWS[h]}' for h in horizons])}")
     logger.info(f"Walk-forward splits: {WALK_FORWARD_SPLITS}")
     logger.info("=" * 80)
 
