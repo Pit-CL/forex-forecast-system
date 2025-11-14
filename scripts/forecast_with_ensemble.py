@@ -113,8 +113,11 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 MIN_TRAINING_DAYS = 180
 MIN_PREDICTION_DAYS = 30
 
+# Scripts directory
+SCRIPTS_DIR = Path(__file__).parent
+
 # Email script path
-EMAIL_SCRIPT = Path(__file__).parent / "test_email_and_pdf.py"
+EMAIL_SCRIPT = SCRIPTS_DIR / "test_email_and_pdf.py"
 
 
 # ============================================================================
