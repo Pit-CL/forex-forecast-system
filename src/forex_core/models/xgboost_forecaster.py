@@ -62,6 +62,12 @@ class XGBoostConfig:
     random_state: int = 42
     n_jobs: int = -1
 
+    # Adaptive training window (auto-adjusts to market conditions)
+    adaptive_window: bool = True  # Enable adaptive window sizing
+    min_training_days: int = 180  # Minimum 6 months
+    max_training_days: int = 730  # Maximum 2 years
+    default_training_days: int = 365  # Default 1 year
+
     @classmethod
     def from_horizon(cls, horizon_days: int) -> XGBoostConfig:
         """
@@ -191,6 +197,55 @@ class XGBoostForecaster:
         self.explainer = None
 
         logger.info(f"Initialized XGBoostForecaster for {config.horizon_days}-day horizon")
+
+    def _calculate_adaptive_window(self, data: pd.DataFrame, target_col: str = 'close') -> int:
+        """
+        Calculate optimal training window based on market volatility.
+
+        In high volatility periods, use shorter window (more reactive).
+        In low volatility periods, use longer window (more stable).
+
+        Args:
+            data: Full historical data
+            target_col: Target column name
+
+        Returns:
+            Optimal number of days to use for training
+        """
+        if not self.config.adaptive_window:
+            return self.config.default_training_days
+
+        # Calculate recent volatility (last 30 days)
+        recent_data = data[target_col].tail(30)
+        recent_volatility = recent_data.pct_change().std()
+
+        # Calculate historical volatility (last 365 days)
+        historical_data = data[target_col].tail(365)
+        historical_volatility = historical_data.pct_change().std()
+
+        # Volatility ratio: >1 means recent volatility is higher than normal
+        volatility_ratio = recent_volatility / (historical_volatility + 1e-10)
+
+        # Adaptive logic:
+        # - High volatility (ratio > 1.5): Use minimum window (6 months)
+        # - Normal volatility (0.8 < ratio < 1.5): Use default window (1 year)
+        # - Low volatility (ratio < 0.8): Use maximum window (2 years)
+
+        if volatility_ratio > 1.5:
+            window_days = self.config.min_training_days
+            reason = f"high volatility (ratio={volatility_ratio:.2f})"
+        elif volatility_ratio < 0.8:
+            window_days = self.config.max_training_days
+            reason = f"low volatility (ratio={volatility_ratio:.2f})"
+        else:
+            window_days = self.config.default_training_days
+            reason = f"normal volatility (ratio={volatility_ratio:.2f})"
+
+        # Ensure we don't exceed available data
+        window_days = min(window_days, len(data))
+
+        logger.info(f"Adaptive window: {window_days} days ({reason})")
+        return window_days
 
     def _create_features(self, data: pd.DataFrame, target_col: str = 'close') -> pd.DataFrame:
         """
@@ -406,6 +461,14 @@ class XGBoostForecaster:
 
             # Store target column for later use in predict()
             self.target_col = target_col
+
+            # Apply adaptive training window
+            window_days = self._calculate_adaptive_window(data, target_col)
+            if window_days < len(data):
+                logger.info(f"Using adaptive window: last {window_days} days of {len(data)} available")
+                data = data.tail(window_days)
+            else:
+                logger.info(f"Using all available data ({len(data)} days)")
 
             # Prepare data
             X_train, y_train, X_val, y_val = self._prepare_training_data(
