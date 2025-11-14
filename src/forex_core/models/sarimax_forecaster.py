@@ -451,6 +451,11 @@ class SARIMAXForecaster:
                 logger.info(f"Using exogenous variables: {available_vars}")
             else:
                 logger.warning("No exogenous variables available, training without exog")
+                self.exog_columns = None  # Explicitly clear exog columns
+        else:
+            # No exog data or no exog vars in config - train univariate
+            self.exog_columns = None
+            logger.info("Training SARIMAX as univariate model (no exogenous variables)")
 
         # Handle missing values
         if endog.isna().any():
