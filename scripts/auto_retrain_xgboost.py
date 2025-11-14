@@ -165,7 +165,12 @@ def load_training_data(days: int = TRAINING_WINDOW_DAYS) -> pd.DataFrame:
         # Add Fed Funds (constant for recent period)
         df["fed_funds"] = fed_funds_value
 
-        # Drop rows with missing values
+        # Forward-fill and backward-fill market data to handle weekends/holidays
+        # Financial markets have different trading days, so we fill gaps
+        for col in ["usdclp", "copper_price", "dxy", "vix"]:
+            df[col] = df[col].ffill().bfill()
+
+        # Drop rows with missing values (should be minimal after ffill/bfill)
         initial_len = len(df)
         df = df.dropna()
         final_len = len(df)
