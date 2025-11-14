@@ -7,8 +7,9 @@ Follows KISS principle: simple functions, efficient pandas operations, no over-e
 Feature Categories:
     - Lagged Features (20): USD/CLP, Copper, DXY, VIX lags
     - Technical Indicators (15): SMA, EMA, RSI, Bollinger Bands, ATR, MACD
-    - Copper Features (7): price, volume, RSI, SMA, EMA, BB position, MACD
+    - Copper Features (11): price, volume, RSI, SMA, EMA, BB position, MACD, LME inventory
     - Macro Features (6): DXY, VIX, TPM, Fed Funds, IMACEC, IPC
+    - Chilean Indicators (25+): Trade balance, IMACEC, China PMI, AFP flows, LME inventory
     - Derived Features (8): Returns, volatility, trend, seasonality
 
 Example:
@@ -58,6 +59,11 @@ def engineer_features(df: pd.DataFrame, horizon: int = 7) -> pd.DataFrame:
             - fed_funds: US Federal Funds rate
             - imacec: Chilean economic activity index (optional)
             - ipc: Chilean CPI (optional)
+            - trade_balance: Chilean trade balance (optional)
+            - imacec_yoy: IMACEC YoY growth rate (optional)
+            - china_pmi: China Manufacturing PMI (optional)
+            - afp_flows: AFP net international flows (optional)
+            - lme_inventory: LME copper inventory (optional)
         horizon: Forecast horizon in days (7, 15, 30, 90)
 
     Returns:
@@ -103,6 +109,9 @@ def engineer_features(df: pd.DataFrame, horizon: int = 7) -> pd.DataFrame:
 
     logger.info("Adding macro features...")
     features = add_macro_features(features)
+
+    logger.info("Adding Chilean indicators...")
+    features = add_chilean_indicators(features)
 
     logger.info("Adding derived features...")
     features = add_derived_features(features)
@@ -349,6 +358,152 @@ def add_macro_features(df: pd.DataFrame) -> pd.DataFrame:
     # IPC inflation rate (if available)
     if 'ipc' in result.columns:
         result['ipc_inflation'] = result['ipc'].pct_change(periods=1)
+
+    return result
+
+
+def add_chilean_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add Chilean economic indicator features.
+
+    Integrates Chilean-specific economic data critical for USD/CLP:
+        - Trade Balance: Exports - Imports (monthly)
+        - IMACEC YoY: Economic activity growth (monthly)
+        - China PMI: Copper demand proxy (monthly)
+        - AFP Flows: Pension fund international flows (monthly)
+        - LME Inventory: Copper supply indicator (daily)
+
+    Key relationships:
+        - Trade surplus → CLP appreciation
+        - IMACEC growth → CLP strength
+        - China PMI > 50 → copper demand ↑ → CLP strength
+        - AFP outflows → CLP weakness
+        - LME inventory ↓ → copper price ↑ → CLP strength
+
+    Args:
+        df: DataFrame with optional Chilean indicator columns
+
+    Returns:
+        DataFrame with Chilean indicator features (forward-filled for alignment)
+
+    Example:
+        >>> df['trade_balance'] = [1000, 1200, np.nan, 800] # Monthly data
+        >>> df = add_chilean_indicators(df)
+        >>> print(df['trade_balance_ma3'].tail())
+    """
+    result = df.copy()
+
+    # Trade Balance (monthly data, forward-fill to daily)
+    if 'trade_balance' in result.columns:
+        # Forward-fill monthly data to daily frequency
+        result['trade_balance_ffill'] = result['trade_balance'].ffill()
+
+        # Moving averages for smoothing
+        result['trade_balance_ma3'] = result['trade_balance_ffill'].rolling(90).mean()  # 3-month MA
+        result['trade_balance_ma6'] = result['trade_balance_ffill'].rolling(180).mean()  # 6-month MA
+
+        # Trade balance momentum
+        result['trade_balance_mom'] = result['trade_balance_ffill'].diff(30)  # Monthly change
+
+        # Normalized trade balance (z-score)
+        rolling_mean = result['trade_balance_ffill'].rolling(365).mean()
+        rolling_std = result['trade_balance_ffill'].rolling(365).std()
+        result['trade_balance_zscore'] = (result['trade_balance_ffill'] - rolling_mean) / rolling_std
+
+    # IMACEC YoY Growth (monthly)
+    if 'imacec_yoy' in result.columns:
+        result['imacec_yoy_ffill'] = result['imacec_yoy'].ffill()
+
+        # IMACEC trend and momentum
+        result['imacec_ma3'] = result['imacec_yoy_ffill'].rolling(90).mean()
+        result['imacec_momentum'] = result['imacec_yoy_ffill'].diff(30)
+
+        # Economic expansion indicator (IMACEC > 3% = strong growth)
+        result['imacec_expansion'] = (result['imacec_yoy_ffill'] > 3).astype(int)
+        result['imacec_contraction'] = (result['imacec_yoy_ffill'] < 0).astype(int)
+
+    # China PMI (monthly)
+    if 'china_pmi' in result.columns:
+        result['china_pmi_ffill'] = result['china_pmi'].ffill()
+
+        # PMI expansion/contraction signal
+        result['china_expansion'] = (result['china_pmi_ffill'] > 50).astype(int)
+
+        # PMI momentum (critical for copper)
+        result['china_pmi_mom'] = result['china_pmi_ffill'].diff()
+        result['china_pmi_ma3'] = result['china_pmi_ffill'].rolling(90).mean()
+
+        # Distance from neutral (50)
+        result['china_pmi_strength'] = result['china_pmi_ffill'] - 50
+
+    # AFP Flows (monthly)
+    if 'afp_flows' in result.columns:
+        result['afp_flows_ffill'] = result['afp_flows'].ffill()
+
+        # Cumulative flows (trend indicator)
+        result['afp_flows_cum'] = result['afp_flows_ffill'].cumsum()
+
+        # Flow momentum
+        result['afp_flows_ma3'] = result['afp_flows_ffill'].rolling(90).mean()
+        result['afp_flows_ma6'] = result['afp_flows_ffill'].rolling(180).mean()
+
+        # Outflow indicator (positive = selling CLP)
+        result['afp_outflow_signal'] = (result['afp_flows_ffill'] > 0).astype(int)
+
+    # LME Inventory (daily/weekly)
+    if 'lme_inventory' in result.columns:
+        result['lme_inventory_ffill'] = result['lme_inventory'].ffill()
+
+        # Inventory change rates
+        result['lme_inv_change_5d'] = result['lme_inventory_ffill'].diff(5)
+        result['lme_inv_change_20d'] = result['lme_inventory_ffill'].diff(20)
+
+        # Inventory trend
+        result['lme_inv_ma20'] = result['lme_inventory_ffill'].rolling(20).mean()
+        result['lme_inv_ma60'] = result['lme_inventory_ffill'].rolling(60).mean()
+
+        # Critical level indicators
+        # Historical context: Low < 150k MT, High > 600k MT
+        result['lme_inv_low'] = (result['lme_inventory_ffill'] < 150000).astype(int)
+        result['lme_inv_high'] = (result['lme_inventory_ffill'] > 600000).astype(int)
+
+        # Inventory z-score
+        inv_mean = result['lme_inventory_ffill'].rolling(252).mean()
+        inv_std = result['lme_inventory_ffill'].rolling(252).std()
+        result['lme_inv_zscore'] = (result['lme_inventory_ffill'] - inv_mean) / inv_std
+
+    # Composite Chilean Economic Health Score
+    # Combines multiple indicators into single metric
+    components = []
+    weights = []
+
+    if 'imacec_yoy_ffill' in result.columns:
+        # IMACEC: normalized around 3% growth
+        components.append((result['imacec_yoy_ffill'] - 3) / 3)
+        weights.append(0.3)
+
+    if 'trade_balance_zscore' in result.columns:
+        # Trade balance z-score
+        components.append(result['trade_balance_zscore'] / 2)  # Scale down
+        weights.append(0.2)
+
+    if 'china_pmi_strength' in result.columns:
+        # China PMI deviation from 50
+        components.append(result['china_pmi_strength'] / 10)
+        weights.append(0.3)
+
+    if 'lme_inv_zscore' in result.columns:
+        # LME inventory (inverted - low inventory is bullish)
+        components.append(-result['lme_inv_zscore'] / 2)
+        weights.append(0.2)
+
+    if components:
+        # Weighted average of available components
+        result['chile_composite_score'] = sum(c * w for c, w in zip(components, weights)) / sum(weights)
+
+        # Smooth the composite score
+        result['chile_composite_ma7'] = result['chile_composite_score'].rolling(7).mean()
+        result['chile_composite_ma30'] = result['chile_composite_score'].rolling(30).mean()
 
     return result
 

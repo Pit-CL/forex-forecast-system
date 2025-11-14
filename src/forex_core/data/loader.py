@@ -28,6 +28,9 @@ from forex_core.data.providers import (
     XeClient,
     YahooClient,
 )
+from forex_core.data.providers.bcentral import BancoCentralProvider
+from forex_core.data.providers.china_indicators import ChinaPMIProvider
+from forex_core.data.providers.afp_flows import AFPFlowProvider
 from forex_core.data.registry import SourceRegistry
 from forex_core.data.warehouse import Warehouse
 
@@ -84,6 +87,10 @@ class DataBundle:
     sources: SourceRegistry
     usdclp_intraday: Optional[pd.Series] = None
     copper_features: Optional[Dict[str, pd.Series]] = None
+    chilean_indicators: Optional[Dict[str, pd.Series]] = None
+    china_pmi: Optional[pd.Series] = None
+    afp_flows: Optional[pd.Series] = None
+    lme_inventory: Optional[pd.Series] = None
 
 
 class DataLoader:
@@ -144,6 +151,18 @@ class DataLoader:
         from forex_core.data.providers.news_aggregator import NewsAggregator
         self.news_aggregator = NewsAggregator(self.settings)
         logger.info("NewsAggregator initialized with multi-source fallback")
+
+        # NEW: Chilean economic indicator providers
+        self.bcentral = BancoCentralProvider()
+        logger.info("Banco Central provider initialized")
+
+        self.china_pmi: Optional[ChinaPMIProvider] = None
+        if self.settings.fred_api_key:
+            self.china_pmi = ChinaPMIProvider(self.settings.fred_api_key)
+            logger.info("China PMI provider initialized")
+
+        self.afp_provider = AFPFlowProvider()
+        logger.info("AFP flows provider initialized")
 
         self._fed_indicator: Optional[Indicator] = None
 
@@ -292,6 +311,18 @@ class DataLoader:
         if pib_indicator:
             indicators["pib"] = pib_indicator
 
+        # NEW: Load Chilean economic indicators
+        chilean_indicators = self.load_chilean_indicators()
+
+        # NEW: Load China PMI (copper demand proxy)
+        china_pmi = self.load_china_indicators()
+
+        # NEW: Load AFP flows
+        afp_flows = self.load_afp_flows()
+
+        # NEW: Load LME inventory
+        lme_inventory = self.load_lme_inventory()
+
         bundle = DataBundle(
             usdclp_series=usdclp_series,
             usdclp_intraday=usdclp_intraday,
@@ -310,6 +341,10 @@ class DataLoader:
             rate_differential=rate_diff,
             sources=self.sources,
             copper_features=copper_features,
+            chilean_indicators=chilean_indicators,
+            china_pmi=china_pmi,
+            afp_flows=afp_flows,
+            lme_inventory=lme_inventory,
         )
 
         logger.info(
@@ -493,6 +528,155 @@ class DataLoader:
         )
         self._fed_indicator = indicator
         return indicator
+
+    def load_chilean_indicators(self) -> Dict[str, pd.Series]:
+        """
+        Load all Chilean economic indicators.
+
+        Includes:
+        - Trade Balance (monthly)
+        - IMACEC YoY growth (monthly)
+        - Current Account (quarterly)
+
+        Returns:
+            Dictionary with Chilean indicator series
+        """
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=365 * 2)  # 2 years of data
+
+        indicators = {}
+
+        try:
+            # Trade balance (monthly)
+            trade_balance = self.bcentral.get_trade_balance(start_date, end_date)
+            if not trade_balance.empty:
+                stored = self.warehouse.upsert_series("chile_trade_balance", trade_balance)
+                indicators["trade_balance"] = stored
+                source_id = self.sources.add(
+                    category="Datos económicos Chile",
+                    name="BCCh - Balanza Comercial",
+                    url="https://si3.bcentral.cl/Siete",
+                    timestamp=trade_balance.index[-1].to_pydatetime(),
+                    note="Balanza comercial mensual (millones CLP)"
+                )
+                logger.info(f"Trade Balance: {len(trade_balance)} observations")
+
+            # IMACEC YoY growth (monthly)
+            imacec = self.bcentral.get_imacec_yoy(start_date, end_date)
+            if not imacec.empty:
+                stored = self.warehouse.upsert_series("chile_imacec_yoy", imacec)
+                indicators["imacec_yoy"] = stored
+                source_id = self.sources.add(
+                    category="Datos económicos Chile",
+                    name="BCCh - IMACEC YoY",
+                    url="https://si3.bcentral.cl/Siete",
+                    timestamp=imacec.index[-1].to_pydatetime(),
+                    note="Índice Mensual de Actividad Económica (var. % anual)"
+                )
+                logger.info(f"IMACEC YoY: {len(imacec)} observations")
+
+            # Current Account (quarterly)
+            current_account = self.bcentral.get_current_account(start_date, end_date)
+            if not current_account.empty:
+                stored = self.warehouse.upsert_series("chile_current_account", current_account)
+                indicators["current_account"] = stored
+                source_id = self.sources.add(
+                    category="Datos económicos Chile",
+                    name="BCCh - Cuenta Corriente",
+                    url="https://si3.bcentral.cl/Siete",
+                    timestamp=current_account.index[-1].to_pydatetime(),
+                    note="Cuenta corriente trimestral (millones CLP)"
+                )
+                logger.info(f"Current Account: {len(current_account)} observations")
+
+        except Exception as e:
+            logger.error(f"Failed to load Chilean indicators from BCCh: {e}")
+
+        logger.info(f"Loaded {len(indicators)} Chilean indicators")
+        return indicators
+
+    def load_china_indicators(self) -> Optional[pd.Series]:
+        """
+        Load China PMI data (copper demand proxy).
+
+        Returns:
+            China PMI series or None if unavailable
+        """
+        if not self.china_pmi:
+            logger.warning("China PMI provider not available (no FRED API key)")
+            return None
+
+        try:
+            # Get manufacturing PMI
+            pmi = self.china_pmi.get_manufacturing_pmi()
+            if not pmi.empty:
+                stored = self.warehouse.upsert_series("china_pmi", pmi)
+                source_id = self.sources.add(
+                    category="Datos internacionales",
+                    name="FRED - China Manufacturing PMI",
+                    url="https://fred.stlouisfed.org/series/MPMICN",
+                    timestamp=pmi.index[-1].to_pydatetime(),
+                    note="PMI manufacturero China (>50 = expansión)"
+                )
+                logger.info(f"China PMI: {len(pmi)} observations, latest: {pmi.iloc[-1]:.1f}")
+                return stored
+
+        except Exception as e:
+            logger.error(f"Failed to load China PMI: {e}")
+
+        return None
+
+    def load_afp_flows(self) -> Optional[pd.Series]:
+        """
+        Load AFP international investment flows.
+
+        Returns:
+            AFP flows series or None if unavailable
+        """
+        try:
+            flows = self.afp_provider.get_net_international_flows()
+            if not flows.empty:
+                stored = self.warehouse.upsert_series("afp_flows", flows)
+                source_id = self.sources.add(
+                    category="Flujos de capital",
+                    name="Superintendencia de Pensiones - Flujos AFP",
+                    url="https://www.spensiones.cl",
+                    timestamp=flows.index[-1].to_pydatetime(),
+                    note="Flujos netos inversión internacional AFP (millones USD)"
+                )
+                logger.info(f"AFP Flows: {len(flows)} observations")
+                return stored
+
+        except Exception as e:
+            logger.error(f"Failed to load AFP flows: {e}")
+
+        return None
+
+    def load_lme_inventory(self) -> Optional[pd.Series]:
+        """
+        Load LME copper inventory data.
+
+        Returns:
+            LME inventory series or None if unavailable
+        """
+        try:
+            inventory = self.copper_client.get_lme_inventory()
+            if not inventory.empty:
+                stored = self.warehouse.upsert_series("lme_copper_inventory", inventory)
+                source_id = self.sources.add(
+                    category="Datos de mercado",
+                    name="FRED - LME Copper Warehouse Stocks",
+                    url="https://fred.stlouisfed.org/series/WMLMEBCMTN",
+                    timestamp=inventory.index[-1].to_pydatetime(),
+                    note="Inventario LME cobre (toneladas métricas)"
+                )
+                logger.info(f"LME Inventory: {len(inventory)} observations")
+                return stored
+
+        except Exception as e:
+            logger.error(f"Failed to load LME inventory: {e}")
+
+        return None
 
     def _worldbank_gdp(self) -> Optional[Indicator]:
         """Fetch latest Chilean GDP growth from World Bank API."""

@@ -11,19 +11,26 @@ Backup Source: FRED API (PCOPPUSDM - Global Price of Copper)
 - USD per metric ton
 - Requires FRED_API_KEY
 
+Additional Data:
+- LME inventory levels (via web scraping or API)
+- COMEX warehouse stocks
+
 This provider fetches copper price data and computes features for forecasting:
 - Raw price series (normalized)
 - Returns (1d, 5d, 20d log returns)
 - Volatility (20d, 60d rolling std, annualized)
 - Trend indicators (SMA 20/50, trend signal)
 - Momentum (RSI 14)
+- Inventory levels (LME, COMEX)
+- Inventory change rates
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
+import httpx
 import numpy as np
 import pandas as pd
 from loguru import logger
@@ -73,6 +80,7 @@ class CopperPricesClient:
         """
         self.settings = settings
         self.yahoo_client = YahooClient(settings)
+        self.http_client = httpx.Client(timeout=30.0)
 
         # Optional FRED backup
         self.fred_client: Optional[FredClient] = None
@@ -347,6 +355,193 @@ class CopperPricesClient:
         )
 
         return correlation
+
+    def get_lme_inventory(self, start_date: Optional[datetime] = None) -> pd.Series:
+        """
+        Fetch LME copper warehouse inventory levels.
+
+        Lower inventory = supply tightness = bullish for copper = bullish for CLP
+        Higher inventory = supply excess = bearish for copper = bearish for CLP
+
+        Note: This uses FRED data as LME direct access requires subscription.
+        Series: WMLMEBCMTN - LME Copper Warehouse Stocks, metric tons
+
+        Args:
+            start_date: Start date for data (defaults to 2 years ago)
+
+        Returns:
+            Series with LME inventory in metric tons
+        """
+        if start_date is None:
+            start_date = datetime.now() - timedelta(days=365 * 2)
+
+        if not self.fred_client:
+            logger.warning("Cannot fetch LME inventory: No FRED API key configured")
+            return pd.Series(dtype=float, name="LME Copper Inventory")
+
+        try:
+            # FRED series for LME copper stocks
+            df = self.fred_client.get_series(
+                "WMLMEBCMTN",
+                observation_start=start_date.date()
+            )
+
+            if df.empty:
+                logger.warning("No LME inventory data available from FRED")
+                return pd.Series(dtype=float, name="LME Copper Inventory")
+
+            # Convert to Series
+            series = pd.Series(
+                df.iloc[:, 0].values,
+                index=df.index,
+                name="LME Copper Inventory"
+            )
+
+            # Log current levels
+            latest = series.iloc[-1]
+            avg_90d = series.tail(90).mean()
+            pct_change = ((latest - avg_90d) / avg_90d) * 100
+
+            logger.info(f"LME Copper Inventory: {latest:,.0f} MT, "
+                       f"90d avg: {avg_90d:,.0f} MT ({pct_change:+.1f}%)")
+
+            return series
+
+        except Exception as e:
+            logger.error(f"Failed to fetch LME inventory: {e}")
+            return pd.Series(dtype=float, name="LME Copper Inventory")
+
+    def compute_inventory_features(self, inventory: pd.Series) -> Dict[str, pd.Series]:
+        """
+        Compute inventory-based features for forecasting.
+
+        Features:
+        - Inventory levels (normalized)
+        - Inventory change rate (daily, weekly)
+        - Days of consumption (inventory/daily demand estimate)
+        - Inventory z-score (deviation from historical mean)
+
+        Args:
+            inventory: LME inventory time series
+
+        Returns:
+            Dictionary of inventory features
+        """
+        if inventory.empty:
+            return {}
+
+        features = {}
+
+        try:
+            # Fill missing values (inventory reported weekly)
+            inventory = inventory.ffill()
+
+            # Inventory change rates
+            features['inventory_change_1d'] = inventory.diff()
+            features['inventory_change_5d'] = inventory.diff(5)
+            features['inventory_change_pct_5d'] = inventory.pct_change(5) * 100
+
+            # Rolling statistics
+            features['inventory_ma_20d'] = inventory.rolling(20).mean()
+            features['inventory_ma_60d'] = inventory.rolling(60).mean()
+
+            # Z-score (standardized inventory level)
+            rolling_mean = inventory.rolling(252).mean()  # 1-year rolling
+            rolling_std = inventory.rolling(252).std()
+            features['inventory_zscore'] = (inventory - rolling_mean) / rolling_std
+
+            # Inventory trend signal
+            features['inventory_trend'] = np.where(
+                features['inventory_ma_20d'] > features['inventory_ma_60d'],
+                1,  # Rising inventory (bearish)
+                -1  # Falling inventory (bullish)
+            )
+
+            # Days of consumption (assuming ~30k MT daily global consumption)
+            daily_consumption_estimate = 30000
+            features['days_of_supply'] = inventory / daily_consumption_estimate
+
+            # Critical level indicators
+            # Historical low: ~100k MT, Historical high: ~700k MT
+            features['inventory_critical_low'] = (inventory < 150000).astype(int)
+            features['inventory_critical_high'] = (inventory > 600000).astype(int)
+
+            logger.info(f"Computed {len(features)} inventory features")
+
+        except Exception as e:
+            logger.error(f"Failed to compute inventory features: {e}")
+
+        return features
+
+    def get_comex_inventory(self) -> Optional[float]:
+        """
+        Fetch latest COMEX copper warehouse stocks.
+
+        COMEX is the US futures exchange, complementary to LME.
+
+        Returns:
+            Latest COMEX inventory in short tons, or None if unavailable
+        """
+        try:
+            # COMEX publishes daily warehouse stocks report
+            # This would require CME Group API access or web scraping
+            logger.warning("COMEX inventory fetching not yet implemented")
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to fetch COMEX inventory: {e}")
+            return None
+
+    def analyze_inventory_price_relationship(
+        self,
+        prices: pd.Series,
+        inventory: pd.Series,
+        window: int = 90
+    ) -> pd.Series:
+        """
+        Analyze relationship between inventory and price.
+
+        Generally inverse relationship:
+        - Falling inventory + rising price = strong bull market
+        - Rising inventory + falling price = strong bear market
+        - Divergence can signal turning points
+
+        Args:
+            prices: Copper price series
+            inventory: Inventory series
+            window: Rolling correlation window (days)
+
+        Returns:
+            Rolling correlation series
+        """
+        if prices.empty or inventory.empty:
+            return pd.Series(dtype=float)
+
+        try:
+            # Align series to common dates
+            aligned = pd.DataFrame({
+                'price': prices,
+                'inventory': inventory
+            }).dropna()
+
+            if len(aligned) < window:
+                logger.warning(f"Insufficient data for {window}-day correlation")
+                return pd.Series(dtype=float)
+
+            # Calculate rolling correlation
+            correlation = aligned['price'].rolling(window).corr(aligned['inventory'])
+            correlation.name = f"Price-Inventory Correlation ({window}d)"
+
+            # Log current relationship
+            latest_corr = correlation.iloc[-1]
+            logger.info(f"Price-Inventory correlation ({window}d): {latest_corr:.3f} "
+                       f"({'Inverse' if latest_corr < -0.3 else 'Normal' if latest_corr < 0.3 else 'Positive'})")
+
+            return correlation
+
+        except Exception as e:
+            logger.error(f"Failed to analyze inventory-price relationship: {e}")
+            return pd.Series(dtype=float)
 
 
 __all__ = ["CopperPricesClient"]

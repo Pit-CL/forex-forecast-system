@@ -36,6 +36,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from forex_core.models.xgboost_forecaster import XGBoostForecaster, XGBoostConfig
 from forex_core.models.sarimax_forecaster import SARIMAXForecaster, SARIMAXConfig
 from forex_core.models.garch_volatility import GARCHVolatility, GARCHConfig
+from forex_core.models.directional_forecaster import DirectionalForecaster, DirectionalForecast
 
 # Import logger
 from forex_core.utils.logging import logger
@@ -248,10 +249,18 @@ class EnsembleForecaster:
             config=garch_config or GARCHConfig.from_horizon(horizon_days)
         )
 
+        # Initialize directional forecaster (feature flag controlled)
+        self.use_directional = True  # Feature flag for directional forecasting
+        self.directional_forecaster = DirectionalForecaster(
+            neutral_threshold=0.005,  # 0.5% threshold
+            classifier_type="gradient_boosting"
+        ) if self.use_directional else None
+
         # Track which models are fitted
         self.xgboost_fitted = False
         self.sarimax_fitted = False
         self.garch_fitted = False
+        self.directional_fitted = False
 
         # Performance tracking
         self.training_metrics: Optional[EnsembleMetrics] = None
@@ -423,7 +432,51 @@ class EnsembleForecaster:
             weights_used = {'xgboost': 0.0, 'sarimax': 1.0}
 
         # ========================================
-        # 5. Fit GARCH on ensemble residuals
+        # 5. Train Directional Forecaster (if enabled)
+        # ========================================
+        if self.use_directional and self.directional_forecaster is not None:
+            try:
+                if verbose:
+                    logger.info("Training directional classifier...")
+
+                # Add directional features to training data
+                train_data_with_direction = self.directional_forecaster.add_directional_features(train_data.copy())
+
+                # Create direction labels
+                y_direction = self.directional_forecaster.create_direction_labels(
+                    train_data_with_direction,
+                    horizon=self.horizon_days,
+                    target_col=target_col
+                )
+
+                # Prepare features (remove target and NaN rows)
+                feature_cols = [col for col in train_data_with_direction.columns if col not in [target_col, 'date']]
+                X_direction = train_data_with_direction[feature_cols]
+
+                # Align features with labels (remove last horizon_days rows)
+                valid_idx = ~y_direction.isna()
+                X_direction = X_direction[valid_idx]
+                y_direction = y_direction[valid_idx]
+
+                # Train classifier
+                metrics_dir = self.directional_forecaster.train_direction_classifier(
+                    X_direction,
+                    y_direction,
+                    validation_split=validation_split,
+                    use_time_series_cv=True
+                )
+
+                self.directional_fitted = True
+
+                if verbose:
+                    logger.info(f"Directional classifier trained: Accuracy={metrics_dir['accuracy']:.2%}")
+
+            except Exception as e:
+                logger.warning(f"Directional forecaster training failed: {str(e)}. Continuing without directional enhancement.")
+                self.directional_fitted = False
+
+        # ========================================
+        # 6. Fit GARCH on ensemble residuals
         # ========================================
         self.ensemble_residuals = actual_values - ensemble_pred
 
@@ -442,7 +495,7 @@ class EnsembleForecaster:
             self.garch_fitted = False
 
         # ========================================
-        # 6. Calculate metrics
+        # 7. Calculate metrics
         # ========================================
         ensemble_rmse = np.sqrt(mean_squared_error(actual_values, ensemble_pred))
         ensemble_mae = mean_absolute_error(actual_values, ensemble_pred)

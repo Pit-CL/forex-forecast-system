@@ -76,6 +76,7 @@ from forex_core.alerts.model_performance_alerts import (
 from forex_core.config import get_settings
 from forex_core.data.loader import DataLoader
 from forex_core.features.feature_engineer import engineer_features
+from forex_core.features.feature_selector import FeatureSelector
 from forex_core.models.xgboost_forecaster import (
     ForecastMetrics,
     XGBoostConfig,
@@ -100,10 +101,10 @@ DEFAULT_HORIZONS = [7, 15, 30, 90]
 # Short-term forecasts (7d, 15d) use 6 months, medium-term (30d) uses 1 year,
 # Long-term (90d) uses 18 months for better seasonal pattern capture
 TRAINING_WINDOWS = {
-    7: 180,   # 6 months for short-term
-    15: 270,  # 9 months for medium-term
-    30: 365,  # 1 year for monthly forecasts
-    90: 540,  # 18 months for quarterly forecasts
+    7: 252,   # 1 year - capture full TPM cycle and ensure MIN_TRAIN_SIZE
+    15: 365,  # 1.5 years - stability and seasonality
+    30: 365,  # 1 year - maintain (already good)
+    90: 730,  # 2 years - better long-term patterns
 }
 
 # Default fallback if horizon not in dictionary
@@ -112,7 +113,7 @@ DEFAULT_TRAINING_WINDOW = 180
 OPTUNA_N_TRIALS = 50
 OPTUNA_N_TRIALS_FAST = 10
 WALK_FORWARD_SPLITS = 5
-MIN_TRAIN_SIZE = 80  # Reduced from 120 to enable 80% walk-forward validation coverage
+MIN_TRAIN_SIZE = 252  # 1 year of trading days for statistical robustness (>4 samples per feature)
 
 # Model save directory
 MODELS_DIR = Path("/app/models")
@@ -274,6 +275,35 @@ def optimize_hyperparameters(
         logger.error(f"Feature engineering failed: {e}")
         raise
 
+    # Feature selection step
+    logger.info(f"Performing feature selection to reduce from {len(features_df.columns)-1} features...")
+    feature_selector = FeatureSelector(target_features=30, correlation_threshold=0.95)
+
+    # Separate features and target
+    target_col = "usdclp"
+    feature_cols = [col for col in features_df.columns if col != target_col]
+    X = features_df[feature_cols]
+    y = features_df[target_col]
+
+    # Apply feature selection
+    try:
+        X_selected = feature_selector.fit_select(X, y, verbose=True)
+        logger.info(f"Selected {len(X_selected.columns)} features for optimization")
+
+        # Reconstruct dataframe with selected features and target
+        features_df_selected = pd.concat([X_selected, y], axis=1)
+
+        # Save feature selector for later use in training
+        models_dir = MODELS_DIR / f"xgboost_{horizon}d"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        selector_path = models_dir / "feature_selector.pkl"
+        feature_selector.save(str(selector_path))
+        logger.info(f"Feature selector saved to {selector_path}")
+
+    except Exception as e:
+        logger.warning(f"Feature selection failed: {e}. Using all features.")
+        features_df_selected = features_df
+
     def objective(trial: optuna.Trial) -> float:
         """Optuna objective function: minimize RMSE."""
 
@@ -295,9 +325,9 @@ def optimize_hyperparameters(
         forecaster = XGBoostForecaster(config)
 
         try:
-            # Walk-forward validation
+            # Walk-forward validation with selected features
             metrics_list = forecaster.walk_forward_validation(
-                features_df,
+                features_df_selected,
                 target_col="usdclp",
                 n_splits=n_splits,
                 min_train_size=MIN_TRAIN_SIZE,
@@ -384,6 +414,26 @@ def train_final_model(
     try:
         # Engineer features
         features_df = engineer_features(data, horizon=horizon)
+
+        # Load and apply feature selector if it exists
+        models_dir = MODELS_DIR / f"xgboost_{horizon}d"
+        selector_path = models_dir / "feature_selector.pkl"
+
+        if selector_path.exists():
+            logger.info(f"Loading feature selector from {selector_path}")
+            feature_selector = FeatureSelector.load(str(selector_path))
+
+            # Apply feature selection
+            target_col = "usdclp"
+            feature_cols = [col for col in features_df.columns if col != target_col]
+            X = features_df[feature_cols]
+            y = features_df[target_col]
+
+            X_selected = feature_selector.transform(X)
+            features_df = pd.concat([X_selected, y], axis=1)
+            logger.info(f"Applied feature selection: {len(X_selected.columns)} features")
+        else:
+            logger.info("No feature selector found, using all features")
 
         # Create config with best hyperparameters
         config = XGBoostConfig(horizon_days=horizon, **hyperparameters)
