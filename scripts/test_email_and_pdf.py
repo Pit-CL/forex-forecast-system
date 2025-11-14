@@ -243,11 +243,49 @@ def create_forecast_chart(data: dict) -> str:
     return img_base64
 
 
+def generate_dynamic_recommendations(data: dict) -> dict:
+    """Generate dynamic recommendations based on forecast data and confidence intervals."""
+    current = data["current_price"]
+    ci80_low = data.get("ci80_low", data["ci95_low"] * 1.1)  # Approximate if not available
+    ci80_high = data.get("ci80_high", data["ci95_high"] * 0.9)
+    bias = data["bias"]
+
+    # Calculate support/resistance levels (rounded to nearest 5)
+    support_level = int(ci80_low / 5) * 5
+    resistance_level = int(ci80_high / 5) * 5
+    mid_level = int(current / 5) * 5
+
+    if bias == "ALCISTA":
+        return {
+            "Importadores": f"Cubrir 30-50% exposición en retrocesos hacia ${support_level}-{support_level+5}. Evitar compras masivas arriba de ${resistance_level}.",
+            "Exportadores": f"Esperar niveles superiores (${resistance_level}+) para vender USD. Aprovechar rally del cobre para mejores tipos de cambio.",
+            "Traders": f"Long USD/CLP en pullbacks a ${support_level}-{support_level+5}, target IC80 superior (${resistance_level}). Stop loss bajo ${support_level-5}.",
+            "Tesorería Corporativa": f"Estrategia escalonada: cubrir 20% actual, 30% en ${support_level+5}, 30% en ${mid_level}, 20% en ${mid_level+5}.",
+        }
+    elif bias == "BAJISTA":
+        return {
+            "Importadores": f"Aguardar descensos hacia ${support_level}-{support_level-5}, no apresurarse en coberturas. Aprovechar debilidad del USD.",
+            "Exportadores": f"Asegurar niveles actuales (${int(current)}), cubrir 40-60% exposición. Vender en rebotes hacia ${resistance_level}.",
+            "Traders": f"Short USD/CLP en rebotes a ${resistance_level}-{resistance_level-5}, target IC80 inferior (${support_level}). Stop loss sobre ${resistance_level+5}.",
+            "Tesorería Corporativa": f"Cubrir en rebotes: 30% en ${resistance_level-5}, 30% en ${mid_level+5}, 20% en ${mid_level}, 20% spot.",
+        }
+    else:  # NEUTRAL
+        return {
+            "Importadores": f"Coberturas escalonadas: 25% en ${support_level}, 25% en ${mid_level-5}, 25% en ${mid_level}, 25% en ${mid_level+5}.",
+            "Exportadores": f"Estrategia neutral, vender en extremos de rango superior (${resistance_level}+). Mantener flexibilidad.",
+            "Traders": f"Range-bound trading entre ${support_level}-{resistance_level}, vender volatilidad. Neutral hasta ruptura clara.",
+            "Tesorería Corporativa": f"Estrategia balanceada: cubrir 20% actual, 30% en ${mid_level-5}, 30% en ${mid_level+5}, 20% en ${resistance_level-5}.",
+        }
+
+
 def generate_email_html(data: dict, chart_base64: str) -> str:
     """Generate complete HTML email with all forecast information."""
 
     bias_class = "bias-alcista" if data["bias"] == "ALCISTA" else "bias-bajista" if data["bias"] == "BAJISTA" else "bias-neutral"
     bias_color = "#28a745" if data["bias"] == "ALCISTA" else "#dc3545" if data["bias"] == "BAJISTA" else "#6c757d"
+
+    # Generate dynamic recommendations
+    recommendations = generate_dynamic_recommendations(data)
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -537,19 +575,19 @@ def generate_email_html(data: dict, chart_base64: str) -> str:
                 <tbody>
                     <tr>
                         <td><strong>Importadores</strong></td>
-                        <td>Cubrir 30-50% exposición en retrocesos hacia $950-952. Evitar compras masivas arriba de $960.</td>
+                        <td>{recommendations["Importadores"]}</td>
                     </tr>
                     <tr>
                         <td><strong>Exportadores</strong></td>
-                        <td>Esperar niveles superiores ($970+) para vender USD. Aprovechar rally del cobre para mejores tipos de cambio.</td>
+                        <td>{recommendations["Exportadores"]}</td>
                     </tr>
                     <tr>
                         <td><strong>Traders</strong></td>
-                        <td>Long USD/CLP en pullbacks a $950-952, target IC80 superior ($972). Stop loss bajo $945.</td>
+                        <td>{recommendations["Traders"]}</td>
                     </tr>
                     <tr>
                         <td><strong>Tesorería Corporativa</strong></td>
-                        <td>Estrategia escalonada: cubrir 20% actual, 30% en $952, 30% en $955, 20% en $958.</td>
+                        <td>{recommendations["Tesorería Corporativa"]}</td>
                     </tr>
                 </tbody>
             </table>
@@ -602,6 +640,9 @@ def generate_pdf_html(data: dict) -> str:
     """Generate HTML for complete 5-page PDF report."""
 
     bias_color = "#28a745" if data["bias"] == "ALCISTA" else "#dc3545" if data["bias"] == "BAJISTA" else "#6c757d"
+
+    # Generate dynamic recommendations
+    recommendations = generate_dynamic_recommendations(data)
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -865,19 +906,19 @@ def generate_pdf_html(data: dict) -> str:
             <tbody>
                 <tr>
                     <td><strong>Importadores</strong></td>
-                    <td>Cubrir 30-50% exposición en retrocesos hacia $950-952. Evitar compras masivas arriba de $960.</td>
+                    <td>{recommendations["Importadores"]}</td>
                 </tr>
                 <tr>
                     <td><strong>Exportadores</strong></td>
-                    <td>Esperar niveles superiores ($970+) para vender USD. Aprovechar rally del cobre para mejores tipos de cambio.</td>
+                    <td>{recommendations["Exportadores"]}</td>
                 </tr>
                 <tr>
                     <td><strong>Traders</strong></td>
-                    <td>Long USD/CLP en pullbacks a $950-952, target IC80 superior ($972). Stop loss bajo $945.</td>
+                    <td>{recommendations["Traders"]}</td>
                 </tr>
                 <tr>
                     <td><strong>Tesorería Corporativa</strong></td>
-                    <td>Estrategia escalonada: cubrir 20% actual, 30% en $952, 30% en $955, 20% en $958.</td>
+                    <td>{recommendations["Tesorería Corporativa"]}</td>
                 </tr>
             </tbody>
         </table>
