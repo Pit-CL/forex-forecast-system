@@ -24,6 +24,13 @@ _all_exports = [
     "DriftTestResult",
 ]
 
+# MLflow integration (optional)
+try:
+    from .mlflow_config import MLflowConfig, is_mlflow_available
+    _all_exports.extend(["MLflowConfig", "is_mlflow_available"])
+except ImportError:
+    pass
+
 try:
     from .tracking import PredictionTracker
     _all_exports.append("PredictionTracker")

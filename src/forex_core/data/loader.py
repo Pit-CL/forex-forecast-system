@@ -20,6 +20,7 @@ from forex_core.data.models import Indicator, MacroEvent, NewsHeadline
 from forex_core.data.providers import (
     AlphaVantageClient,
     BackupMacroCalendarClient,
+    CopperPricesClient,
     FederalReserveClient,
     FredClient,
     MacroCalendarClient,
@@ -53,6 +54,7 @@ class DataBundle:
         rate_differential: TPM - Fed Funds rate differential.
         sources: Source registry for citations.
         usdclp_intraday: Optional intraday USD/CLP data (if available).
+        copper_features: Optional derived copper features (volatility, RSI, etc.).
 
     Example:
         >>> from forex_core.data import DataLoader
@@ -61,6 +63,8 @@ class DataBundle:
         >>> print(f"USD/CLP: {bundle.indicators['usdclp_spot'].value}")
         >>> print(f"Latest: {bundle.usdclp_series.iloc[-1]}")
         >>> print(f"Sources: {len(bundle.sources)}")
+        >>> if bundle.copper_features:
+        ...     print(f"Copper volatility: {bundle.copper_features['copper_volatility_20d'].iloc[-1]:.3f}")
     """
 
     usdclp_series: pd.Series
@@ -79,6 +83,7 @@ class DataBundle:
     rate_differential: float
     sources: SourceRegistry
     usdclp_intraday: Optional[pd.Series] = None
+    copper_features: Optional[Dict[str, pd.Series]] = None
 
 
 class DataLoader:
@@ -122,6 +127,7 @@ class DataLoader:
         self.federal_reserve = FederalReserveClient(self.settings)
         self.xe = XeClient(self.settings)
         self.yahoo = YahooClient(self.settings)
+        self.copper_client = CopperPricesClient(self.settings)
 
         # Optional providers (require API keys)
         self.alpha_client: Optional[AlphaVantageClient] = None
@@ -174,17 +180,17 @@ class DataLoader:
         # Load Chilean indicators
         usdclp_series = self._usdclp_series()
         usdclp_intraday = self._usdclp_intraday()
-        copper_indicator = self._indicator_from_mindicador(
-            "libra_cobre", "Precio libra de cobre (USD)"
-        )
+
         tpm_indicator = self._indicator_from_mindicador(
             "tpm", "Tasa Política Monetaria (TPM)"
         )
         ipc_indicator = self._indicator_from_mindicador("ipc", "Inflación IPC mensual")
 
-        copper_series = self._indicator_series("libra_cobre", alias="copper_lme")
         tpm_series = self._indicator_series("tpm", alias="tpm_chile")
         inflation_series = self._indicator_series("ipc", alias="ipc_chile")
+
+        # Load copper data with enhanced features (Yahoo Finance primary, FRED backup)
+        copper_series, copper_indicator, copper_features = self._load_copper_data()
 
         indicators = {
             "usdclp_spot": self._usdclp_spot(),
@@ -303,6 +309,7 @@ class DataLoader:
             next_fomc=next_fomc,
             rate_differential=rate_diff,
             sources=self.sources,
+            copper_features=copper_features,
         )
 
         logger.info(
@@ -528,6 +535,126 @@ class DataLoader:
             logger.warning(f"Could not fetch World Bank GDP: {exc}")
 
         return None
+
+    def _load_copper_data(
+        self,
+    ) -> tuple[pd.Series, Indicator, Optional[Dict[str, pd.Series]]]:
+        """
+        Load copper price data with enhanced features.
+
+        Uses CopperPricesClient with dual-source fallback:
+        1. Yahoo Finance HG=F (primary - daily updates)
+        2. FRED PCOPPUSDM (backup - monthly updates)
+
+        Returns:
+            Tuple of (copper_series, copper_indicator, copper_features):
+            - copper_series: Historical price series stored in warehouse
+            - copper_indicator: Latest copper price as Indicator
+            - copper_features: Dict of derived features (volatility, RSI, etc.)
+                              or None if feature computation fails
+
+        Example:
+            >>> series, indicator, features = loader._load_copper_data()
+            >>> print(f"Copper: ${indicator.value:.2f} USD/lb")
+            >>> print(f"20d volatility: {features['copper_volatility_20d'].iloc[-1]:.3f}")
+        """
+        try:
+            # Fetch 5 years of copper price data
+            logger.info("Loading copper prices with enhanced features")
+            copper_series_raw = self.copper_client.fetch_series(years=5)
+
+            # Store in warehouse for caching
+            copper_series = self.warehouse.upsert_series("copper_hgf_usd_lb", copper_series_raw)
+
+            # Register source
+            source_id = self.sources.add(
+                category="Datos de mercado",
+                name="Yahoo Finance - HG=F (Copper Futures)",
+                url="https://finance.yahoo.com/quote/HG=F",
+                timestamp=copper_series.index[-1].to_pydatetime(),
+                note="Futuros de cobre COMEX (USD/libra)",
+            )
+
+            # Get latest copper indicator
+            copper_indicator = self.copper_client.get_latest_indicator(source_id=source_id)
+
+            # Compute derived features
+            try:
+                copper_features = self.copper_client.compute_features(copper_series)
+
+                # Add correlation with USD/CLP if we have the data
+                try:
+                    usdclp_for_corr = self._usdclp_series()
+                    correlation = self.copper_client.compute_correlation_with_usdclp(
+                        copper_series, usdclp_for_corr, window=90
+                    )
+                    copper_features["copper_usdclp_correlation_90d"] = correlation
+                    logger.info(
+                        f"Copper-USDCLP correlation (90d avg): {correlation.mean():.3f}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not compute copper-USDCLP correlation: {e}")
+
+                logger.info(
+                    f"Computed {len(copper_features)} copper features "
+                    f"(vol_20d mean: {copper_features['copper_volatility_20d'].mean():.3f})"
+                )
+            except Exception as e:
+                logger.warning(f"Could not compute copper features: {e}")
+                copper_features = None
+
+            return copper_series, copper_indicator, copper_features
+
+        except Exception as e:
+            logger.error(f"Failed to load copper data: {e}")
+            # Fallback: try to use cached data from warehouse
+            try:
+                logger.warning("Attempting to use cached copper data from warehouse")
+                copper_series = self.warehouse.get_series("copper_hgf_usd_lb")
+                if copper_series is None or len(copper_series) == 0:
+                    raise ValueError("No cached copper data available")
+
+                # Create indicator from cached data
+                source_id = self.sources.add(
+                    category="Datos de mercado",
+                    name="Copper (cached)",
+                    url="",
+                    timestamp=copper_series.index[-1].to_pydatetime(),
+                    note="Datos en caché (fuente principal no disponible)",
+                )
+                copper_indicator = Indicator(
+                    name="Precio del cobre (cached)",
+                    value=float(copper_series.iloc[-1]),
+                    unit="USD/lb",
+                    timestamp=copper_series.index[-1].to_pydatetime(),
+                    source_id=source_id,
+                )
+
+                logger.info(f"Using {len(copper_series)} cached copper data points")
+                return copper_series, copper_indicator, None
+
+            except Exception as cache_error:
+                logger.error(f"Cached copper data also unavailable: {cache_error}")
+                # Last resort: create empty series with NaN to not break pipeline
+                logger.warning("Creating empty copper series - forecasts may be degraded")
+                empty_series = pd.Series(dtype=float, name="copper_usd_lb")
+
+                source_id = self.sources.add(
+                    category="Datos de mercado",
+                    name="Copper (unavailable)",
+                    url="",
+                    timestamp=datetime.utcnow(),
+                    note="Datos de cobre no disponibles",
+                )
+                empty_indicator = Indicator(
+                    name="Precio del cobre (N/A)",
+                    value=float("nan"),
+                    unit="USD/lb",
+                    timestamp=datetime.utcnow(),
+                    source_id=source_id,
+                )
+
+                return empty_series, empty_indicator, None
 
 
 __all__ = ["DataBundle", "DataLoader"]

@@ -17,6 +17,7 @@ Available Providers:
     - MacroCalendarClient: Economic calendar events
     - BackupMacroCalendarClient: Fallback calendar source
     - NewsApiClient: News with sentiment analysis
+    - CopperPricesClient: Copper futures prices with technical features
 
 Example:
     >>> from forex_core.data.providers import MindicadorClient
@@ -32,6 +33,7 @@ from __future__ import annotations
 
 from .alpha_vantage import AlphaVantageClient
 from .base import BaseHTTPClient
+from .copper_prices import CopperPricesClient
 from .federal_reserve import FederalReserveClient
 from .fred import FredClient
 from .macro_calendar import MacroCalendarClient
@@ -54,4 +56,5 @@ __all__ = [
     "MacroCalendarClient",
     "BackupMacroCalendarClient",
     "NewsApiClient",
+    "CopperPricesClient",
 ]
