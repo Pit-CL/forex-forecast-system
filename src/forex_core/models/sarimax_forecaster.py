@@ -611,13 +611,20 @@ class SARIMAXForecaster:
             logger.info(f"Generating {steps}-step SARIMAX forecast...")
 
             if return_conf_int:
+                logger.debug(f"Calling get_forecast with steps={steps}, exog={exog_forecast is not None}")
                 forecast_result = self.model.get_forecast(steps=steps, exog=exog_forecast)
+                logger.debug(f"Got forecast_result: {type(forecast_result)}")
                 y_pred = forecast_result.predicted_mean.values
+                logger.debug(f"Got y_pred: shape={y_pred.shape if hasattr(y_pred, 'shape') else 'N/A'}")
                 conf_int = forecast_result.conf_int(alpha=alpha)
+                logger.debug(f"Got conf_int: shape={conf_int.shape if hasattr(conf_int, 'shape') else 'N/A'}")
                 lower_bound = conf_int.iloc[:, 0].values
                 upper_bound = conf_int.iloc[:, 1].values
             else:
-                y_pred = self.model.forecast(steps=steps, exog=exog_forecast).values
+                logger.debug(f"Calling forecast with steps={steps}, exog={exog_forecast is not None}")
+                forecast_output = self.model.forecast(steps=steps, exog=exog_forecast)
+                logger.debug(f"Got forecast_output: {type(forecast_output)}")
+                y_pred = forecast_output.values
                 lower_bound = None
                 upper_bound = None
 
@@ -651,7 +658,9 @@ class SARIMAXForecaster:
             return result
 
         except Exception as e:
+            import traceback
             logger.error(f"Prediction failed: {str(e)}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             raise
 
     def get_diagnostics(self) -> ResidualDiagnostics:
