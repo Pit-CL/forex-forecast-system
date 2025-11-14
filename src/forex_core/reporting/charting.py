@@ -211,6 +211,9 @@ class ChartGenerator:
         ax.legend(loc="best", fontsize=10)
         ax.grid(True, alpha=0.3)
 
+        # Format date axis to prevent overlapping labels
+        self._format_date_axis(ax, date_format='%Y-%m-%d', rotation=45, max_ticks=10)
+
         # Save chart
         chart_path = self.chart_dir / f"chart_hist_overview_{horizon}.png"
         fig.tight_layout()
@@ -294,6 +297,9 @@ class ChartGenerator:
         y_padding = (y_max - y_min) * 0.1  # 10% padding
         ax.set_ylim(y_min - y_padding, y_max + y_padding)
 
+        # Format date axis to prevent overlapping labels
+        self._format_date_axis(ax, date_format='%Y-%m-%d', rotation=45, max_ticks=8)
+
         # Save chart
         chart_path = self.chart_dir / f"chart_tactical_zoom_{horizon}.png"
         fig.tight_layout()
@@ -365,6 +371,9 @@ class ChartGenerator:
         ax.set_ylabel("CLP por USD", fontsize=12)
         ax.legend(loc="best", fontsize=10)
         ax.grid(True, alpha=0.3, zorder=1)
+
+        # Format date axis to prevent overlapping labels
+        self._format_date_axis(ax, date_format='%Y-%m-%d', rotation=45, max_ticks=8)
 
         # Save chart
         chart_path = self.chart_dir / f"chart_forecast_bands_{horizon}.png"
