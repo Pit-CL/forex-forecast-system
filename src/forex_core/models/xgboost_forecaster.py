@@ -216,17 +216,32 @@ class XGBoostForecaster:
         if not self.config.adaptive_window:
             return self.config.default_training_days
 
-        # IMPORTANT: Use raw values (not normalized/scaled) for trend calculation
-        # Try to find 'value' column (raw data), otherwise use target_col
-        # This ensures we calculate trends on actual exchange rate values
-        trend_col = 'value' if 'value' in data.columns else target_col
+        # CRITICAL: Load raw values directly from parquet for trend calculation
+        # This avoids alignment issues with feature-engineered data
+        try:
+            from pathlib import Path
+            parquet_path = Path("/app/data/warehouse/usdclp_daily.parquet")
+            if not parquet_path.exists():
+                parquet_path = Path("data/warehouse/usdclp_daily.parquet")
+
+            if parquet_path.exists():
+                raw_df = pd.read_parquet(parquet_path)
+                # Use the FULL raw data for trend calculation
+                logger.info(f"Using raw parquet data for trend (last value: {raw_df['value'].iloc[-1]:.2f})")
+                trend_data = raw_df['value']
+            else:
+                logger.warning("Parquet not found, using processed data (may affect trend detection)")
+                trend_data = data[target_col]
+        except Exception as e:
+            logger.warning(f"Failed to load raw parquet: {e}. Using processed data")
+            trend_data = data[target_col]
 
         # Calculate recent volatility (last 30 days)
-        recent_data = data[trend_col].tail(30)
+        recent_data = trend_data.tail(30)
         recent_volatility = recent_data.pct_change().std()
 
         # Calculate historical volatility (last 365 days)
-        historical_data = data[trend_col].tail(365)
+        historical_data = trend_data.tail(365)
         historical_volatility = historical_data.pct_change().std()
 
         # Volatility ratio: >1 means recent volatility is higher than normal
@@ -234,9 +249,9 @@ class XGBoostForecaster:
 
         # NEW: Calculate trend strength (momentum)
         # Strong downtrend or uptrend → use shorter window to adapt faster
-        recent_7d = data[trend_col].tail(7)
-        recent_14d = data[trend_col].tail(14)
-        recent_30d = data[trend_col].tail(30)
+        recent_7d = trend_data.tail(7)
+        recent_14d = trend_data.tail(14)
+        recent_30d = trend_data.tail(30)
 
         # Calculate percentage changes
         change_7d = (recent_7d.iloc[-1] - recent_7d.iloc[0]) / recent_7d.iloc[0]

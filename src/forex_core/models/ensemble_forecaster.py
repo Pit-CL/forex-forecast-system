@@ -317,6 +317,8 @@ class EnsembleForecaster:
 
         # IMPORTANT: Ensure 'value' column exists for adaptive window calculation
         # Load RAW values from parquet (not processed/scaled) for trend detection
+        # NOTE: We load ALL raw data here, not just training subset, because
+        # adaptive window needs access to most recent values for trend detection
         if 'value' not in data.columns:
             logger.info("Loading raw USD/CLP values from parquet for adaptive window")
             data = data.copy()  # Avoid modifying original
@@ -329,10 +331,14 @@ class EnsembleForecaster:
 
                 if parquet_path.exists():
                     raw_df = pd.read_parquet(parquet_path)
-                    #  Use .loc[] to match exact dates, not reindex (which can cause misalignment)
+                    # Match dates and copy ALL raw values
+                    # Use common index (intersection of data and raw_df)
                     common_idx = data.index.intersection(raw_df.index)
                     data.loc[common_idx, 'value'] = raw_df.loc[common_idx, 'value']
+
+                    # CRITICAL: Also need to verify we got the latest values
                     logger.info(f"Added raw 'value' column from parquet ({len(common_idx)} rows matched)")
+                    logger.info(f"Last date in data: {data.index[-1]}, Last raw value: {raw_df['value'].iloc[-1]:.2f}")
                 else:
                     # Fallback: use target_col (may be processed)
                     logger.warning(f"Parquet not found, using '{target_col}' for adaptive window (may affect accuracy)")
