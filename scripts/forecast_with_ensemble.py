@@ -568,6 +568,28 @@ def save_results(
 
     logger.info(f"Results saved to {output_file}")
 
+    # Log to PredictionTracker so email system can consume it
+    try:
+        from forex_core.mlops.tracking import PredictionTracker
+
+        predictions_dir = DATA_DIR / "predictions"
+        predictions_dir.mkdir(parents=True, exist_ok=True)
+        predictions_path = predictions_dir / "predictions.parquet"
+
+        tracker = PredictionTracker(storage_path=predictions_path)
+        tracker.log_prediction(
+            forecast_date=datetime.now(),
+            horizon=f"{horizon_days}d",
+            target_date=forecast.dates[-1],
+            predicted_mean=float(forecast_price),
+            ci95_low=float(forecast.lower_2sigma[-1]),
+            ci95_high=float(forecast.upper_2sigma[-1]),
+        )
+        logger.info(f"Prediction logged to tracker: {predictions_path}")
+    except Exception as e:
+        logger.warning(f"Failed to log prediction to tracker: {e}")
+        # Don't fail the entire workflow if tracking fails
+
     return result
 
 
