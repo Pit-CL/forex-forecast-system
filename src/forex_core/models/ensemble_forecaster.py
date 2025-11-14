@@ -316,11 +316,29 @@ class EnsembleForecaster:
             raise ValueError(f"Target column '{target_col}' not found")
 
         # IMPORTANT: Ensure 'value' column exists for adaptive window calculation
-        # If not present, create it from target_col (raw values for trend detection)
+        # Load RAW values from parquet (not processed/scaled) for trend detection
         if 'value' not in data.columns:
-            logger.info(f"Adding 'value' column from '{target_col}' for adaptive window")
+            logger.info("Loading raw USD/CLP values from parquet for adaptive window")
             data = data.copy()  # Avoid modifying original
-            data['value'] = data[target_col]
+            try:
+                from pathlib import Path
+                parquet_path = Path("/app/data/warehouse/usdclp_daily.parquet")
+                if not parquet_path.exists():
+                    # Try local path
+                    parquet_path = Path("data/warehouse/usdclp_daily.parquet")
+
+                if parquet_path.exists():
+                    raw_df = pd.read_parquet(parquet_path)
+                    # Align with data index and add as 'value' column
+                    data['value'] = raw_df['value'].reindex(data.index, method='ffill')
+                    logger.info(f"Added raw 'value' column from parquet ({len(data)} rows)")
+                else:
+                    # Fallback: use target_col (may be processed)
+                    logger.warning(f"Parquet not found, using '{target_col}' for adaptive window (may affect accuracy)")
+                    data['value'] = data[target_col]
+            except Exception as e:
+                logger.warning(f"Failed to load raw values: {e}. Using '{target_col}' as fallback")
+                data['value'] = data[target_col]
 
         # Split data for validation
         split_idx = int(len(data) * (1 - validation_split))
