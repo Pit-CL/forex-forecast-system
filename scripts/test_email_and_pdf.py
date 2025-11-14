@@ -302,6 +302,76 @@ def interpret_copper_impacts(copper_features: dict) -> dict:
     }
 
 
+def generate_dynamic_risks(data: dict, market_data: dict) -> dict:
+    """Generate dynamic risk considerations based on current market conditions and forecast bias."""
+    bias = data["bias"]
+    copper_price = market_data["copper_price"]
+    copper_features = data.get("copper_features", {})
+    dxy = market_data["dxy"]
+    vix = market_data["vix"]
+    rsi_copper = copper_features.get("rsi_14", 50)
+
+    # Determine current market state
+    copper_high = copper_price > 4.5  # High copper zone
+    copper_low = copper_price < 3.8   # Low copper zone
+    dxy_strong = dxy > 105
+    dxy_weak = dxy < 100
+    vix_high = vix > 20
+    vix_low = vix < 15
+    copper_overbought = rsi_copper > 70
+    copper_oversold = rsi_copper < 30
+
+    # Generate upside risks (USD/CLP sube)
+    upside_risks = []
+
+    # Copper-related upside risks
+    if copper_high or copper_overbought:
+        upside_risks.append(f"Corrección técnica del cobre desde niveles actuales (US${copper_price}/lb, RSI={rsi_copper:.0f})")
+    elif not copper_low:
+        upside_risks.append("Desaceleración de demanda china por cobre afecta precio commodity")
+    else:
+        upside_risks.append("Persistencia de precio del cobre en niveles bajos presiona términos de intercambio")
+
+    # DXY-related upside risks
+    if dxy_weak:
+        upside_risks.append(f"Reversión del DXY desde niveles bajos actuales ({dxy:.1f}) por datos macro USA positivos")
+    elif dxy_strong:
+        upside_risks.append(f"Continuación de fortaleza del DXY (actualmente {dxy:.1f}) por diferencial tasas")
+    else:
+        upside_risks.append("Fortalecimiento del DXY por sorpresas positivas en datos macro USA")
+
+    # VIX-related upside risks
+    if vix_high:
+        upside_risks.append(f"Persistencia de volatilidad elevada (VIX={vix:.1f}) afecta apetito por riesgo emergente")
+    else:
+        upside_risks.append(f"Spike sorpresivo de volatilidad global desde niveles actuales (VIX={vix:.1f})")
+
+    # Generate downside risks (USD/CLP baja)
+    downside_risks = []
+
+    # Copper-related downside risks
+    if copper_low or copper_oversold:
+        downside_risks.append(f"Rally del cobre desde niveles actuales (US${copper_price}/lb, RSI={rsi_copper:.0f}) por estímulos China")
+    elif copper_high:
+        downside_risks.append(f"Continuación de rally del cobre desde zona alta (US${copper_price}/lb) por demanda sostenida")
+    else:
+        downside_risks.append("Aceleración de demanda china por cobre impulsa rally sostenido del commodity")
+
+    # Central Bank / TPM risks
+    if bias == "ALCISTA":
+        downside_risks.append("Intervención verbal o cambiaria del Banco Central para frenar alza USD/CLP")
+    else:
+        downside_risks.append("Sorpresa hawkish del Banco Central (alza TPM inesperada) fortalece CLP")
+
+    # Terms of trade risks
+    downside_risks.append("Mejora sustancial en términos de intercambio por precios commodities")
+
+    return {
+        "upside": upside_risks,
+        "downside": downside_risks
+    }
+
+
 def generate_dynamic_drivers(market_data: dict, bias: str) -> list:
     """Generate dynamic driver descriptions based on real market data."""
     copper = market_data["copper_price"]
@@ -414,6 +484,9 @@ def load_latest_forecast_data(horizon: str, project_root: Path):
         "drivers": generate_dynamic_drivers(market_data, bias),
         "system_health": calculate_system_health(horizon, project_root / "data" / "predictions" / "predictions.parquet")
     }
+
+    # Generate dynamic risks after data dict is created (needs copper_features in data)
+    data["risks"] = generate_dynamic_risks(data, market_data)
 
     return data
 
@@ -1108,16 +1181,12 @@ def generate_pdf_html(data: dict) -> str:
         <div class="highlight">
             <h3 style="margin-top: 0;">Riesgos Alcistas (USD/CLP sube):</h3>
             <ul>
-                <li>Corrección en precio del cobre (actualmente en zona alta)</li>
-                <li>Fortalecimiento inesperado del DXY por datos macro USA</li>
-                <li>Aumento sorpresivo de volatilidad global (VIX > 20)</li>
+                {''.join(f'<li>{risk}</li>' for risk in data['risks']['upside'])}
             </ul>
 
             <h3>Riesgos Bajistas (USD/CLP baja):</h3>
             <ul>
-                <li>Rally sostenido del cobre por demanda China</li>
-                <li>Intervención del Banco Central en mercado cambiario</li>
-                <li>Mejora sustancial en términos de intercambio Chile</li>
+                {''.join(f'<li>{risk}</li>' for risk in data['risks']['downside'])}
             </ul>
         </div>
     </div>
