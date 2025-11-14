@@ -2,15 +2,7 @@
 FROM python:3.12-slim AS base
 
 # Install system dependencies for WeasyPrint
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libcairo2 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libgdk-pixbuf-2.0-0 \
-    libffi-dev \
-    shared-mime-info \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y     build-essential     libcairo2     libpango-1.0-0     libpangocairo-1.0-0     libgdk-pixbuf-2.0-0     libffi-dev     shared-mime-info     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -18,15 +10,16 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
+# Copy source code and scripts
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 
 # Set environment
 ENV PYTHONPATH=/app/src
 ENV ENVIRONMENT=production
 
 # Create directories
-RUN mkdir -p /app/data /app/output /app/logs
+RUN mkdir -p /app/data /app/output /app/logs /app/reports
 
 # Run 7d forecaster
 CMD ["python", "-m", "services.forecaster_7d.cli", "run"]

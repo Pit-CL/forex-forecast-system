@@ -20,13 +20,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 
 # Set environment
 ENV PYTHONPATH=/app/src
 ENV ENVIRONMENT=production
 
 # Create directories
-RUN mkdir -p /app/data /app/output /app/logs
+RUN mkdir -p /app/data /app/output /app/logs /app/reports
 
 # Run 12m forecaster
 CMD ["python", "-m", "services.forecaster_12m.cli", "run"]
