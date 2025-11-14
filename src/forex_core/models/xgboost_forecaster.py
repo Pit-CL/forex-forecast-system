@@ -200,10 +200,11 @@ class XGBoostForecaster:
 
     def _calculate_adaptive_window(self, data: pd.DataFrame, target_col: str = 'close') -> int:
         """
-        Calculate optimal training window based on market volatility.
+        Calculate optimal training window based on market volatility AND trend direction.
 
-        In high volatility periods, use shorter window (more reactive).
-        In low volatility periods, use longer window (more stable).
+        Uses two factors:
+        1. Volatility: High volatility → shorter window
+        2. Trend strength: Strong recent trend → shorter window for faster adaptation
 
         Args:
             data: Full historical data
@@ -226,25 +227,56 @@ class XGBoostForecaster:
         # Volatility ratio: >1 means recent volatility is higher than normal
         volatility_ratio = recent_volatility / (historical_volatility + 1e-10)
 
-        # Adaptive logic:
-        # - High volatility (ratio > 1.5): Use minimum window (6 months)
-        # - Normal volatility (0.8 < ratio < 1.5): Use default window (1 year)
-        # - Low volatility (ratio < 0.8): Use maximum window (2 years)
+        # NEW: Calculate trend strength (momentum)
+        # Strong downtrend or uptrend → use shorter window to adapt faster
+        recent_7d = data[target_col].tail(7)
+        recent_14d = data[target_col].tail(14)
+        recent_30d = data[target_col].tail(30)
 
-        if volatility_ratio > 1.5:
+        # Calculate percentage changes
+        change_7d = (recent_7d.iloc[-1] - recent_7d.iloc[0]) / recent_7d.iloc[0]
+        change_14d = (recent_14d.iloc[-1] - recent_14d.iloc[0]) / recent_14d.iloc[0]
+        change_30d = (recent_30d.iloc[-1] - recent_30d.iloc[0]) / recent_30d.iloc[0]
+
+        # Trend strength: average of recent changes (absolute value)
+        trend_strength = abs(change_7d) * 0.5 + abs(change_14d) * 0.3 + abs(change_30d) * 0.2
+
+        # Trend consistency: all periods moving in same direction?
+        same_direction = (
+            (change_7d > 0 and change_14d > 0 and change_30d > 0) or
+            (change_7d < 0 and change_14d < 0 and change_30d < 0)
+        )
+
+        # Adaptive logic with trend awareness:
+        # Strong trend (>2% movement) with consistency → use minimum window
+        # High volatility OR strong trend → use shorter window
+        # Normal conditions → use default window
+        # Low volatility AND weak trend → use maximum window
+
+        reasons = []
+
+        if same_direction and trend_strength > 0.02:  # Strong consistent trend (>2%)
             window_days = self.config.min_training_days
-            reason = f"high volatility (ratio={volatility_ratio:.2f})"
-        elif volatility_ratio < 0.8:
+            reasons.append(f"strong {'down' if change_7d < 0 else 'up'}trend ({trend_strength*100:.1f}%)")
+        elif volatility_ratio > 1.5:
+            window_days = self.config.min_training_days
+            reasons.append(f"high volatility (ratio={volatility_ratio:.2f})")
+        elif trend_strength > 0.015:  # Moderate trend (>1.5%)
+            window_days = int((self.config.min_training_days + self.config.default_training_days) / 2)
+            reasons.append(f"moderate trend ({trend_strength*100:.1f}%)")
+        elif volatility_ratio < 0.8 and trend_strength < 0.01:
             window_days = self.config.max_training_days
-            reason = f"low volatility (ratio={volatility_ratio:.2f})"
+            reasons.append(f"low volatility ({volatility_ratio:.2f}) + weak trend ({trend_strength*100:.1f}%)")
         else:
             window_days = self.config.default_training_days
-            reason = f"normal volatility (ratio={volatility_ratio:.2f})"
+            reasons.append(f"normal conditions (vol={volatility_ratio:.2f}, trend={trend_strength*100:.1f}%)")
 
         # Ensure we don't exceed available data
         window_days = min(window_days, len(data))
 
-        logger.info(f"Adaptive window: {window_days} days ({reason})")
+        logger.info(f"Adaptive window: {window_days} days ({', '.join(reasons)})")
+        logger.info(f"  Recent changes: 7d={change_7d*100:.1f}%, 14d={change_14d*100:.1f}%, 30d={change_30d*100:.1f}%)")
+
         return window_days
 
     def _create_features(self, data: pd.DataFrame, target_col: str = 'close') -> pd.DataFrame:
