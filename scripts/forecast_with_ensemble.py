@@ -455,13 +455,17 @@ def generate_forecast(
     model_path = MODELS_DIR / f"ensemble_{horizon_days}d"
 
     # Train or load models
+    # Note: SARIMAX is trained WITHOUT exogenous variables (univariate)
+    # This is because we cannot forecast future values of copper, DXY, VIX, TPM
+    # SARIMAX is excellent at capturing trend/seasonality from USD/CLP itself
     metrics = None
     if train_models:
         logger.info("Training new ensemble models...")
+        logger.info("SARIMAX will be univariate (no exogenous variables)")
         metrics = forecaster.train(
             data=features_df,
             target_col='usdclp',
-            exog_data=exog_df,
+            exog_data=None,  # No exogenous variables for SARIMAX
         )
         logger.info(f"Training complete. Metrics: {metrics}")
     else:
@@ -471,10 +475,11 @@ def generate_forecast(
             logger.info("Loaded existing models")
         except FileNotFoundError:
             logger.warning("Models not found - training new models...")
+            logger.info("SARIMAX will be univariate (no exogenous variables)")
             metrics = forecaster.train(
                 data=features_df,
                 target_col='usdclp',
-                exog_data=exog_df,
+                exog_data=None,  # No exogenous variables for SARIMAX
             )
 
     # Generate forecast
@@ -483,7 +488,7 @@ def generate_forecast(
 
     forecast = forecaster.predict(
         data=features_df,
-        exog_forecast=exog_df,
+        exog_forecast=None,  # No exogenous forecast needed
     )
 
     logger.info(
