@@ -329,9 +329,10 @@ class EnsembleForecaster:
 
                 if parquet_path.exists():
                     raw_df = pd.read_parquet(parquet_path)
-                    # Align with data index and add as 'value' column
-                    data['value'] = raw_df['value'].reindex(data.index, method='ffill')
-                    logger.info(f"Added raw 'value' column from parquet ({len(data)} rows)")
+                    #  Use .loc[] to match exact dates, not reindex (which can cause misalignment)
+                    common_idx = data.index.intersection(raw_df.index)
+                    data.loc[common_idx, 'value'] = raw_df.loc[common_idx, 'value']
+                    logger.info(f"Added raw 'value' column from parquet ({len(common_idx)} rows matched)")
                 else:
                     # Fallback: use target_col (may be processed)
                     logger.warning(f"Parquet not found, using '{target_col}' for adaptive window (may affect accuracy)")
