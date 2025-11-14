@@ -429,6 +429,51 @@ Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')} (Chile)
             extra={"recipients": self.recipients, "subject": subject},
         )
 
+    def _convert_base64_to_cid(self, html_body: str) -> tuple[str, dict]:
+        """
+        Convert base64 embedded images to CID attachments.
+
+        Args:
+            html_body: HTML with base64 images
+
+        Returns:
+            Tuple of (updated_html, image_attachments_dict)
+        """
+        import re
+        import base64
+        from uuid import uuid4
+
+        image_attachments = {}
+
+        # Find all base64 images in src="data:image/..."
+        pattern = r'src="data:image/(png|jpeg|jpg|gif);base64,([^"]+)"'
+
+        def replace_with_cid(match):
+            image_format = match.group(1)
+            base64_data = match.group(2)
+
+            # Generate unique CID
+            cid = f"image_{uuid4().hex[:12]}"
+
+            # Decode base64 to bytes
+            try:
+                image_data = base64.b64decode(base64_data)
+                image_attachments[cid] = image_data
+
+                # Replace with CID reference
+                return f'src="cid:{cid}"'
+            except Exception as e:
+                logger.warning(f"Failed to convert base64 image to CID: {e}")
+                # Keep original if conversion fails
+                return match.group(0)
+
+        # Replace all base64 images with CID references
+        updated_html = re.sub(pattern, replace_with_cid, html_body)
+
+        logger.info(f"Converted {len(image_attachments)} base64 images to CID attachments")
+
+        return updated_html, image_attachments
+
     def send_unified(
         self,
         html_body: str,
@@ -455,6 +500,9 @@ Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')} (Chile)
         from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
         from email.mime.application import MIMEApplication
+        from email.mime.image import MIMEImage
+        import re
+        import base64
 
         logger.info(
             f"Sending unified email: {subject}",
@@ -470,24 +518,37 @@ Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')} (Chile)
                 if not pdf_path.exists():
                     raise FileNotFoundError(f"PDF attachment not found: {pdf_path}")
 
-        # Create multipart message
-        message = MIMEMultipart("alternative")
+        # Convert base64 images to CID attachments for better email client compatibility
+        html_body, image_attachments = self._convert_base64_to_cid(html_body)
+
+        # Create multipart message with related for images
+        message = MIMEMultipart("related")
         message["Subject"] = subject
         message["From"] = self.gmail_user
         message["To"] = ", ".join(self.recipients)
 
+        # Create alternative part for text/html
+        msg_alternative = MIMEMultipart("alternative")
+        message.attach(msg_alternative)
+
         # Plain text fallback
         if text_body is None:
             # Simple HTML to text conversion
-            import re
             text_body = re.sub(r'<[^>]+>', '', html_body)
 
         # Attach both plain text and HTML
         part1 = MIMEText(text_body, "plain")
         part2 = MIMEText(html_body, "html")
 
-        message.attach(part1)
-        message.attach(part2)
+        msg_alternative.attach(part1)
+        msg_alternative.attach(part2)
+
+        # Attach images as CID
+        for cid, image_data in image_attachments.items():
+            img = MIMEImage(image_data)
+            img.add_header('Content-ID', f'<{cid}>')
+            img.add_header('Content-Disposition', 'inline')
+            message.attach(img)
 
         # Attach PDFs if provided
         if pdf_attachments:

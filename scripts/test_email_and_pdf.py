@@ -51,19 +51,23 @@ def load_latest_forecast_data(horizon: str, project_root: Path):
     horizon_days = int(horizon.replace('d', ''))
 
     # Sample data structure (will be replaced with actual forecast data)
+    # UPDATED with real market values as of Nov 14, 2025
+    current_price_real = 927.90  # Real USDCLP from yfinance
+    forecast_7d = 935.50  # Simulated 7d forecast (+0.8%)
+
     data = {
         "horizon": horizon,
         "horizon_days": horizon_days,
         "generated_at": datetime.now().strftime('%d/%m/%Y %H:%M'),
-        "current_price": 954.20,
-        "forecast_price": 965.65 if horizon == "7d" else 972.0,
-        "change_pct": 1.20 if horizon == "7d" else 1.80,
+        "current_price": current_price_real,
+        "forecast_price": forecast_7d if horizon == "7d" else current_price_real * 1.012,
+        "change_pct": ((forecast_7d - current_price_real) / current_price_real * 100) if horizon == "7d" else 1.20,
         "bias": "ALCISTA",
         "volatility": "MEDIA",
-        "ci95_low": 945.0,
-        "ci95_high": 986.0,
-        "ci80_low": 952.0,
-        "ci80_high": 979.0,
+        "ci95_low": current_price_real * 0.985,  # -1.5%
+        "ci95_high": current_price_real * 1.020,  # +2.0%
+        "ci80_low": current_price_real * 0.993,  # -0.7%
+        "ci80_high": current_price_real * 1.012,  # +1.2%
         "copper_features": {
             "return_1d": 0.8,
             "volatility_20d": 23.4,
@@ -72,11 +76,11 @@ def load_latest_forecast_data(horizon: str, project_root: Path):
             "correlation_90d": -0.687,
         },
         "drivers": [
-            "Precio del Cobre (NUEVO): Tendencia alcista del cobre (+2.3% últimos 5 días) presiona a la baja el USD/CLP.",
-            "TPM Banco Central: Mantención de tasa en 5.50% mantiene diferencial con Fed estable.",
-            "DXY (Índice Dólar): Fortaleza moderada del dólar (DXY=104.2) limita descensos del USD/CLP.",
-            "Volatilidad VIX: VIX en 15.2 señala baja volatilidad global, favorable para emergentes.",
-            "Correlación Copper-USD/CLP: Correlación negativa histórica de -0.69 se mantiene, confirmando relación esperada.",
+            "Precio del Cobre: Cotización estable en US$4.04/lb presiona USD/CLP a la baja según correlación histórica negativa.",
+            "TPM Banco Central: Mantención en 5.50% mantiene diferencial con Fed (5.00%), apoyando peso chileno.",
+            "DXY (Índice Dólar): Debilidad del dólar (DXY=99.32) favorece descensos en USD/CLP.",
+            "Volatilidad VIX: VIX en 21.39 señala volatilidad moderada-alta, requiere monitoreo cercano.",
+            "Correlación Copper-USD/CLP: Relación negativa -0.69 se mantiene, cobre estable favorece fortaleza del peso.",
         ],
         "system_health": {
             "status": "OPTIMAL",
