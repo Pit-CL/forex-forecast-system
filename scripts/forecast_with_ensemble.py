@@ -455,14 +455,15 @@ def generate_forecast(
     model_path = MODELS_DIR / f"ensemble_{horizon_days}d"
 
     # Train or load models
+    metrics = None
     if train_models:
         logger.info("Training new ensemble models...")
-        train_metrics = forecaster.train(
+        metrics = forecaster.train(
             data=features_df,
             target_col='usdclp',
             exog_data=exog_df,
         )
-        logger.info(f"Training complete. Metrics: {train_metrics}")
+        logger.info(f"Training complete. Metrics: {metrics}")
     else:
         # Try to load existing models
         try:
@@ -470,7 +471,7 @@ def generate_forecast(
             logger.info("Loaded existing models")
         except FileNotFoundError:
             logger.warning("Models not found - training new models...")
-            train_metrics = forecaster.train(
+            metrics = forecaster.train(
                 data=features_df,
                 target_col='usdclp',
                 exog_data=exog_df,
@@ -484,9 +485,6 @@ def generate_forecast(
         data=features_df,
         exog_forecast=exog_df,
     )
-
-    # Get performance metrics
-    metrics = forecaster.get_metrics()
 
     logger.info(
         f"Forecast generated: {horizon_days} days, "
@@ -575,7 +573,7 @@ def detect_market_shocks(
 
 def save_results(
     forecast: EnsembleForecast,
-    metrics: EnsembleMetrics,
+    metrics: Optional[EnsembleMetrics],
     market_analysis: Dict[str, Any],
     horizon_days: int,
 ) -> Path:
@@ -585,11 +583,11 @@ def save_results(
     Creates:
     - output/forecast_YYYYMMDD_Hd.json: Complete results
     - output/forecast_YYYYMMDD_Hd.csv: Time series data
-    - output/metrics_YYYYMMDD_Hd.json: Model performance metrics
+    - output/metrics_YYYYMMDD_Hd.json: Model performance metrics (if available)
 
     Args:
         forecast: Ensemble forecast results
-        metrics: Model performance metrics
+        metrics: Model performance metrics (None if models were loaded)
         market_analysis: Market shock detection results
         horizon_days: Forecast horizon
 
@@ -636,19 +634,22 @@ def save_results(
 
     logger.info(f"Time series saved to {csv_path}")
 
-    # Save metrics (JSON)
-    metrics_dict = {
-        'xgboost': metrics.xgboost_metrics,
-        'sarimax': metrics.sarimax_metrics,
-        'garch': metrics.garch_metrics,
-        'ensemble': metrics.ensemble_metrics,
-    }
+    # Save metrics (JSON) - only if available from training
+    if metrics is not None:
+        metrics_dict = {
+            'xgboost': metrics.xgboost_metrics,
+            'sarimax': metrics.sarimax_metrics,
+            'garch': metrics.garch_metrics,
+            'ensemble': metrics.ensemble_metrics,
+        }
 
-    metrics_path = OUTPUT_DIR / f"metrics_{timestamp}_{horizon_days}d.json"
-    with open(metrics_path, 'w') as f:
-        json.dump(metrics_dict, f, indent=2)
+        metrics_path = OUTPUT_DIR / f"metrics_{timestamp}_{horizon_days}d.json"
+        with open(metrics_path, 'w') as f:
+            json.dump(metrics_dict, f, indent=2)
 
-    logger.info(f"Metrics saved to {metrics_path}")
+        logger.info(f"Metrics saved to {metrics_path}")
+    else:
+        logger.info("No metrics to save (models were loaded, not trained)")
 
     return json_path
 
