@@ -214,8 +214,8 @@ def _convert_databundle_to_dataframe(loader: DataLoader, days: int) -> pd.DataFr
     # Start with USDCLP as the base
     df = pd.DataFrame(index=bundle.usdclp_series.index)
     df['usdclp'] = bundle.usdclp_series
-    # IMPORTANT: Keep raw values for adaptive window calculation (trend detection)
-    df['value'] = bundle.usdclp_series  # Raw exchange rate for adaptive window
+    # NOTE: 'value' column will be loaded by ensemble_forecaster from parquet
+    # This ensures we use truly raw values for adaptive window calculation
 
     # Add copper data
     if hasattr(bundle, 'copper_series') and bundle.copper_series is not None:
@@ -353,9 +353,8 @@ def _load_data_fallback(horizon: int) -> pd.DataFrame:
 
     df.rename(columns=column_mapping, inplace=True)
 
-    # IMPORTANT: Keep raw 'usdclp' values as 'value' for adaptive window
-    if 'usdclp' in df.columns:
-        df['value'] = df['usdclp']  # Raw exchange rate for trend detection
+    # NOTE: 'value' column will be loaded by ensemble_forecaster from parquet
+    # This ensures we use truly raw values for adaptive window calculation
 
     # Fill missing columns with defaults (for testing)
     if 'copper_price' not in df.columns:
