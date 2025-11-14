@@ -102,6 +102,11 @@ class Settings(BaseSettings):
         alias="NEWS_API_KEY",
         description="NewsAPI.org API key for news data",
     )
+    newsdata_api_key: Optional[str] = Field(
+        default=None,
+        alias="NEWSDATA_API_KEY",
+        description="NewsData.io API key for news data (fallback)",
+    )
     news_query: str = Field(
         default="Banco Central de Chile",
         alias="NEWS_QUERY",

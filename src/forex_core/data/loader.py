@@ -24,7 +24,6 @@ from forex_core.data.providers import (
     FredClient,
     MacroCalendarClient,
     MindicadorClient,
-    NewsApiClient,
     XeClient,
     YahooClient,
 )
@@ -135,10 +134,10 @@ class DataLoader:
             self.fred = FredClient(self.settings)
             logger.info("FRED client initialized")
 
-        self.news_api: Optional[NewsApiClient] = None
-        if self.settings.news_api_key:
-            self.news_api = NewsApiClient(self.settings)
-            logger.info("NewsAPI client initialized")
+        # Use NewsAggregator for resilient multi-source news fetching
+        from forex_core.data.providers.news_aggregator import NewsAggregator
+        self.news_aggregator = NewsAggregator(self.settings)
+        logger.info("NewsAggregator initialized with multi-source fallback")
 
         self._fed_indicator: Optional[Indicator] = None
 
@@ -424,22 +423,34 @@ class DataLoader:
         return events
 
     def _news(self) -> List[NewsHeadline]:
-        """Load recent news if NewsAPI available."""
-        if not self.news_api:
+        """
+        Load recent news using multi-source aggregator with fallback.
+
+        Uses NewsAggregator which tries multiple sources in order:
+        1. NewsAPI.org (100 requests/day)
+        2. NewsData.io (200 requests/day)
+        3. RSS Feeds (unlimited)
+        4. Empty list (non-blocking - forecast continues without news)
+
+        This method is resilient and will never cause forecast failures.
+        """
+        try:
+            articles = self.news_aggregator.fetch_latest(hours=48)
+            enriched: List[NewsHeadline] = []
+            for article in articles:
+                source_id = self.sources.add(
+                    category="Contexto macro",
+                    name=f"{article.source} - {article.title[:60]}",
+                    url=article.url,
+                    timestamp=article.published_at,
+                    note="Cobertura geopolítica/noticias cobre",
+                )
+                article.source_id = source_id
+                enriched.append(article)
+            return enriched
+        except Exception as e:
+            logger.error(f"NewsAggregator failed unexpectedly: {e}. Continuing without news.")
             return []
-        articles = self.news_api.fetch_latest(hours=48, source_id=0)
-        enriched: List[NewsHeadline] = []
-        for article in articles:
-            source_id = self.sources.add(
-                category="Contexto macro",
-                name=f"{article.source} - {article.title[:60]}",
-                url=article.url,
-                timestamp=article.published_at,
-                note="Cobertura geopolítica/noticias cobre",
-            )
-            article.source_id = source_id
-            enriched.append(article)
-        return enriched
 
     def _rate_differential(self, tpm: Indicator) -> float:
         """Calculate TPM - Fed Funds differential."""
