@@ -491,7 +491,7 @@ def generate_email_html(data: dict, chart_base64: str) -> str:
         Generado automáticamente el {data['generated_at']} (Chile)<br>
         <em>Este informe utiliza modelos de inteligencia artificial y no constituye asesoría financiera.</em><br>
         <em>Consulte con su asesor antes de tomar decisiones de inversión.</em><br><br>
-        <strong>Versión:</strong> 2.1.0 | <strong>Modelo:</strong> Chronos-T5 | <strong>Copper Integration:</strong> ✅ Activo
+        <strong>Versión:</strong> 3.0.0 | <strong>Modelo:</strong> Ensemble (XGBoost + SARIMAX + GARCH) | <strong>Copper Integration:</strong> ✅ Activo
     </div>
 </body>
 </html>
@@ -815,19 +815,25 @@ def generate_pdf_html(data: dict) -> str:
     <div class="section">
         <h2>🔬 Metodología</h2>
         <p>
-            Este pronóstico fue generado usando el modelo <strong>Chronos-T5 (Amazon)</strong> con arquitectura
-            de transformer pre-entrenado en series temporales. El modelo fue fine-tuned con:
+            Este pronóstico fue generado usando un <strong>Ensemble de modelos interpretables</strong> que combina:
         </p>
         <ul>
-            <li>Datos históricos USD/CLP (5 años)</li>
-            <li>Indicadores macroeconómicos Chile (TPM, Inflación, IMACEC)</li>
-            <li>Indicadores internacionales (DXY, VIX, EEM, Fed Funds)</li>
-            <li><strong>NUEVO: 11 features técnicas del precio del cobre (HG=F)</strong></li>
-            <li>Eventos económicos y noticias relevantes</li>
+            <li><strong>XGBoost</strong>: Gradient boosting con SHAP para interpretabilidad</li>
+            <li><strong>SARIMAX</strong>: Modelo estacional ARIMA con variables exógenas</li>
+            <li><strong>GARCH/EGARCH</strong>: Modelos de volatilidad para intervalos de confianza</li>
         </ul>
         <p>
-            <strong>Mejora esperada con Copper:</strong> +15-25% en accuracy (RMSE reduction)<br>
-            <strong>Período de evaluación:</strong> 2-3 semanas post-deployment
+            <strong>Features utilizadas (55+):</strong>
+        </p>
+        <ul>
+            <li>Datos históricos USD/CLP con lags y transformaciones (17 features)</li>
+            <li>Indicadores técnicos: RSI, Bollinger Bands, MACD, ATR (23 features)</li>
+            <li>Precio del cobre: Retornos, volatilidad, RSI, tendencia (5 features)</li>
+            <li>Indicadores macro: DXY, VIX, TPM, Fed Funds (6 features)</li>
+            <li>Features derivadas: Ratios, interacciones, ciclos (11 features)</li>
+        </ul>
+        <p>
+            <strong>Optimización automática:</strong> XGBoost semanal (Optuna), SARIMAX mensual (Auto-ARIMA)
         </p>
     </div>
 
@@ -880,7 +886,7 @@ def generate_pdf_html(data: dict) -> str:
             Generado automáticamente el {data['generated_at']} (Chile)<br>
             <em>Este informe utiliza modelos de inteligencia artificial y no constituye asesoría financiera.</em><br>
             <em>Consulte con su asesor antes de tomar decisiones de inversión.</em><br><br>
-            <strong>Versión:</strong> 2.1.0 | <strong>Modelo:</strong> Chronos-T5 | <strong>Copper Integration:</strong> ✅ Activo
+            <strong>Versión:</strong> 3.0.0 | <strong>Modelo:</strong> Ensemble (XGBoost + SARIMAX + GARCH) | <strong>Copper Integration:</strong> ✅ Activo
         </p>
     </div>
 </body>
