@@ -393,8 +393,18 @@ def add_chilean_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     result = df.copy()
 
+    # Count how many Chilean indicators are present
+    chilean_cols = ['trade_balance', 'imacec_yoy', 'china_pmi', 'afp_flows', 'lme_inventory']
+    present_cols = [col for col in chilean_cols if col in result.columns and not result[col].isna().all()]
+
+    if not present_cols:
+        logger.warning("No Chilean indicators available, skipping Chilean features")
+        return result  # Return unchanged if no data
+
+    logger.info(f"Found {len(present_cols)} Chilean indicators: {present_cols}")
+
     # Trade Balance (monthly data, forward-fill to daily)
-    if 'trade_balance' in result.columns:
+    if 'trade_balance' in result.columns and not result['trade_balance'].isna().all():
         # Forward-fill monthly data to daily frequency
         result['trade_balance_ffill'] = result['trade_balance'].ffill()
 
@@ -406,12 +416,16 @@ def add_chilean_indicators(df: pd.DataFrame) -> pd.DataFrame:
         result['trade_balance_mom'] = result['trade_balance_ffill'].diff(30)  # Monthly change
 
         # Normalized trade balance (z-score)
-        rolling_mean = result['trade_balance_ffill'].rolling(365).mean()
-        rolling_std = result['trade_balance_ffill'].rolling(365).std()
-        result['trade_balance_zscore'] = (result['trade_balance_ffill'] - rolling_mean) / rolling_std
+        rolling_mean = result['trade_balance_ffill'].rolling(365, min_periods=30).mean()
+        rolling_std = result['trade_balance_ffill'].rolling(365, min_periods=30).std()
+        # Avoid division by zero for constant values
+        if rolling_std.notna().any() and (rolling_std != 0).any():
+            result['trade_balance_zscore'] = (result['trade_balance_ffill'] - rolling_mean) / rolling_std.replace(0, 1)
+        else:
+            result['trade_balance_zscore'] = 0  # If constant, z-score is 0
 
     # IMACEC YoY Growth (monthly)
-    if 'imacec_yoy' in result.columns:
+    if 'imacec_yoy' in result.columns and not result['imacec_yoy'].isna().all():
         result['imacec_yoy_ffill'] = result['imacec_yoy'].ffill()
 
         # IMACEC trend and momentum
@@ -423,7 +437,7 @@ def add_chilean_indicators(df: pd.DataFrame) -> pd.DataFrame:
         result['imacec_contraction'] = (result['imacec_yoy_ffill'] < 0).astype(int)
 
     # China PMI (monthly)
-    if 'china_pmi' in result.columns:
+    if 'china_pmi' in result.columns and not result['china_pmi'].isna().all():
         result['china_pmi_ffill'] = result['china_pmi'].ffill()
 
         # PMI expansion/contraction signal
@@ -437,7 +451,7 @@ def add_chilean_indicators(df: pd.DataFrame) -> pd.DataFrame:
         result['china_pmi_strength'] = result['china_pmi_ffill'] - 50
 
     # AFP Flows (monthly)
-    if 'afp_flows' in result.columns:
+    if 'afp_flows' in result.columns and not result['afp_flows'].isna().all():
         result['afp_flows_ffill'] = result['afp_flows'].ffill()
 
         # Cumulative flows (trend indicator)
@@ -451,7 +465,7 @@ def add_chilean_indicators(df: pd.DataFrame) -> pd.DataFrame:
         result['afp_outflow_signal'] = (result['afp_flows_ffill'] > 0).astype(int)
 
     # LME Inventory (daily/weekly)
-    if 'lme_inventory' in result.columns:
+    if 'lme_inventory' in result.columns and not result['lme_inventory'].isna().all():
         result['lme_inventory_ffill'] = result['lme_inventory'].ffill()
 
         # Inventory change rates
@@ -468,9 +482,13 @@ def add_chilean_indicators(df: pd.DataFrame) -> pd.DataFrame:
         result['lme_inv_high'] = (result['lme_inventory_ffill'] > 600000).astype(int)
 
         # Inventory z-score
-        inv_mean = result['lme_inventory_ffill'].rolling(252).mean()
-        inv_std = result['lme_inventory_ffill'].rolling(252).std()
-        result['lme_inv_zscore'] = (result['lme_inventory_ffill'] - inv_mean) / inv_std
+        inv_mean = result['lme_inventory_ffill'].rolling(252, min_periods=20).mean()
+        inv_std = result['lme_inventory_ffill'].rolling(252, min_periods=20).std()
+        # Avoid division by zero for constant values
+        if inv_std.notna().any() and (inv_std != 0).any():
+            result['lme_inv_zscore'] = (result['lme_inventory_ffill'] - inv_mean) / inv_std.replace(0, 1)
+        else:
+            result['lme_inv_zscore'] = 0  # If constant, z-score is 0
 
     # Composite Chilean Economic Health Score
     # Combines multiple indicators into single metric
@@ -482,7 +500,7 @@ def add_chilean_indicators(df: pd.DataFrame) -> pd.DataFrame:
         components.append((result['imacec_yoy_ffill'] - 3) / 3)
         weights.append(0.3)
 
-    if 'trade_balance_zscore' in result.columns:
+    if 'trade_balance_zscore' in result.columns and not result['trade_balance_zscore'].isna().all():
         # Trade balance z-score
         components.append(result['trade_balance_zscore'] / 2)  # Scale down
         weights.append(0.2)
@@ -492,7 +510,7 @@ def add_chilean_indicators(df: pd.DataFrame) -> pd.DataFrame:
         components.append(result['china_pmi_strength'] / 10)
         weights.append(0.3)
 
-    if 'lme_inv_zscore' in result.columns:
+    if 'lme_inv_zscore' in result.columns and not result['lme_inv_zscore'].isna().all():
         # LME inventory (inverted - low inventory is bullish)
         components.append(-result['lme_inv_zscore'] / 2)
         weights.append(0.2)

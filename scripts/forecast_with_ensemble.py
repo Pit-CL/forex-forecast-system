@@ -151,13 +151,15 @@ def load_and_prepare_data(horizon_days: int, verbose: bool = False) -> Tuple[pd.
     if DataLoader is not None:
         try:
             loader = DataLoader()
-            raw_data = loader.load_latest(days=MIN_TRAINING_DAYS + horizon_days)
+            # DataLoader.load() returns a DataBundle, not a DataFrame
+            # We need to convert it to the expected DataFrame format
+            raw_data = _convert_databundle_to_dataframe(loader, MIN_TRAINING_DAYS + horizon_days)
             logger.info(f"Loaded {len(raw_data)} days of data via DataLoader")
         except Exception as e:
             logger.warning(f"DataLoader failed: {e}. Using fallback...")
-            raw_data = _load_data_fallback()
+            raw_data = _load_data_fallback(horizon_days)
     else:
-        raw_data = _load_data_fallback()
+        raw_data = _load_data_fallback(horizon_days)
 
     # Validate minimum data
     if len(raw_data) < MIN_TRAINING_DAYS:
@@ -194,7 +196,93 @@ def load_and_prepare_data(horizon_days: int, verbose: bool = False) -> Tuple[pd.
     return features_df, exog_df
 
 
-def _load_data_fallback() -> pd.DataFrame:
+def _convert_databundle_to_dataframe(loader: DataLoader, days: int) -> pd.DataFrame:
+    """
+    Convert DataBundle from DataLoader to DataFrame format expected by feature engineering.
+
+    Args:
+        loader: DataLoader instance
+        days: Number of days of data to load
+
+    Returns:
+        DataFrame with columns: usdclp, copper_price, dxy, vix, tpm, fed_funds,
+                                and Chilean indicators if available
+    """
+    # Load the DataBundle
+    bundle = loader.load()
+
+    # Start with USDCLP as the base
+    df = pd.DataFrame(index=bundle.usdclp_series.index)
+    df['usdclp'] = bundle.usdclp_series
+
+    # Add copper data
+    if hasattr(bundle, 'copper_series') and bundle.copper_series is not None:
+        # Align copper data with USDCLP index
+        df['copper_price'] = bundle.copper_series.reindex(df.index, method='ffill')
+
+    # Add DXY
+    if hasattr(bundle, 'dxy_series') and bundle.dxy_series is not None:
+        df['dxy'] = bundle.dxy_series.reindex(df.index, method='ffill')
+
+    # Add VIX
+    if hasattr(bundle, 'vix_series') and bundle.vix_series is not None:
+        df['vix'] = bundle.vix_series.reindex(df.index, method='ffill')
+
+    # Add TPM (Chilean policy rate)
+    if hasattr(bundle, 'tpm_series') and bundle.tpm_series is not None:
+        df['tpm'] = bundle.tpm_series.reindex(df.index, method='ffill')
+
+    # Add Fed Funds rate (if available)
+    if 'fed_target' in bundle.indicators:
+        df['fed_funds'] = bundle.indicators['fed_target'].value
+    else:
+        # Default Fed Funds rate
+        df['fed_funds'] = 5.0
+
+    # Add Chilean economic indicators
+    if hasattr(bundle, 'chilean_indicators') and bundle.chilean_indicators:
+        for name, series in bundle.chilean_indicators.items():
+            if series is not None:
+                # Resample monthly to daily and forward-fill
+                daily_series = series.resample('D').ffill() if not series.empty else series
+                df[name] = daily_series.reindex(df.index, method='ffill')
+                logger.info(f"Added Chilean indicator: {name}")
+
+    # Add China PMI
+    if hasattr(bundle, 'china_pmi') and bundle.china_pmi is not None:
+        # Resample monthly to daily
+        daily_pmi = bundle.china_pmi.resample('D').ffill() if not bundle.china_pmi.empty else bundle.china_pmi
+        df['china_pmi'] = daily_pmi.reindex(df.index, method='ffill')
+        logger.info("Added China PMI data")
+
+    # Add AFP flows
+    if hasattr(bundle, 'afp_flows') and bundle.afp_flows is not None:
+        # Resample monthly to daily
+        daily_afp = bundle.afp_flows.resample('D').ffill() if not bundle.afp_flows.empty else bundle.afp_flows
+        df['afp_flows'] = daily_afp.reindex(df.index, method='ffill')
+        logger.info("Added AFP flows data")
+
+    # Add LME inventory
+    if hasattr(bundle, 'lme_inventory') and bundle.lme_inventory is not None:
+        df['lme_inventory'] = bundle.lme_inventory.reindex(df.index, method='ffill')
+        logger.info("Added LME inventory data")
+
+    # Take only the requested number of days
+    if len(df) > days:
+        df = df.iloc[-days:]
+
+    # Drop rows with NaN in core columns
+    core_cols = ['usdclp', 'copper_price', 'dxy', 'vix', 'tpm', 'fed_funds']
+    existing_core = [col for col in core_cols if col in df.columns]
+    df = df.dropna(subset=existing_core)
+
+    logger.info(f"Converted DataBundle to DataFrame: {len(df)} rows, {len(df.columns)} columns")
+    logger.info(f"Columns: {df.columns.tolist()}")
+
+    return df
+
+
+def _load_data_fallback(horizon: int) -> pd.DataFrame:
     """
     Fallback data loading if DataLoader is unavailable.
 
@@ -284,7 +372,43 @@ def _load_data_fallback() -> pd.DataFrame:
         logger.warning("Fed Funds not found - using default value")
         df['fed_funds'] = 5.0
 
+    # NEW: Add Chilean indicators with reasonable defaults to prevent pipeline failure
+    # These will be used if Chilean data is not available in the CSV
+    chilean_defaults = {
+        'trade_balance': 0,      # Neutral trade balance
+        'imacec_yoy': 2.5,       # Average Chilean growth rate
+        'china_pmi': 50.0,       # Neutral PMI (50 = expansion/contraction line)
+        'afp_flows': 0,          # No net flows
+        # lme_inventory can remain missing - it's truly optional
+    }
+
+    # Try to load Chilean indicators from a separate CSV if available
+    chilean_csv = DATA_DIR / "chilean_indicators.csv"
+    if chilean_csv.exists():
+        try:
+            chilean_df = pd.read_csv(chilean_csv, index_col=0, parse_dates=True)
+            # Merge Chilean data with main DataFrame
+            df = df.join(chilean_df, how='left')
+            logger.info(f"Loaded Chilean indicators from {chilean_csv}")
+        except Exception as e:
+            logger.warning(f"Failed to load Chilean indicators: {e}")
+
+    # Apply defaults for any missing Chilean indicators
+    for indicator, default_value in chilean_defaults.items():
+        if indicator not in df.columns:
+            logger.info(f"Adding default {indicator} = {default_value}")
+            df[indicator] = default_value
+        else:
+            # Fill NaN values in existing columns
+            if df[indicator].isna().all():
+                logger.info(f"Filling empty {indicator} with default = {default_value}")
+                df[indicator] = default_value
+            elif df[indicator].isna().any():
+                logger.info(f"Forward-filling {indicator} NaN values")
+                df[indicator] = df[indicator].fillna(method='ffill').fillna(default_value)
+
     logger.info(f"Loaded {len(df)} rows from {data_file}")
+    logger.info(f"Available columns: {df.columns.tolist()}")
 
     return df
 
@@ -297,164 +421,149 @@ def generate_forecast(
     features_df: pd.DataFrame,
     exog_df: Optional[pd.DataFrame],
     horizon_days: int,
-    train: bool = False,
+    train_models: bool = False,
     verbose: bool = False,
-) -> Tuple[EnsembleForecast, EnsembleForecaster]:
+) -> Tuple[EnsembleForecast, EnsembleMetrics]:
     """
-    Generate forecast using ensemble model.
-
-    Workflow:
-    1. Load trained ensemble from disk (or train if requested)
-    2. Generate predictions for horizon_days
-    3. Calculate confidence intervals
-    4. Package results
+    Generate ensemble forecast using XGBoost, SARIMAX, and GARCH.
 
     Args:
-        features_df: Full feature-engineered dataset
-        exog_df: Exogenous variables for SARIMAX
+        features_df: DataFrame with engineered features
+        exog_df: Exogenous variables for SARIMAX (optional)
         horizon_days: Forecast horizon (7, 15, 30, 90)
-        train: Whether to train new model (default: load existing)
+        train_models: Whether to train new models
         verbose: Enable verbose logging
 
     Returns:
-        Tuple of (forecast, ensemble_model)
+        Tuple of (forecast, metrics)
+        - forecast: EnsembleForecast object with predictions
+        - metrics: Performance metrics for each model
 
     Raises:
-        FileNotFoundError: If model not found and train=False
-        RuntimeError: If forecast generation fails
+        FileNotFoundError: If models not found and train_models=False
+        ValueError: If training fails
     """
-    model_dir = MODELS_DIR / f"ensemble_{horizon_days}d"
+    if verbose:
+        logger.info(f"Initializing ensemble forecaster (horizon={horizon_days}d)...")
 
     # Initialize ensemble
-    ensemble = EnsembleForecaster(horizon_days=horizon_days)
+    forecaster = EnsembleForecaster(
+        horizon_days=horizon_days,
+    )
 
-    # Load or train
-    if train or not model_dir.exists():
-        logger.info(f"Training new ensemble for {horizon_days}d horizon...")
-
-        if verbose:
-            logger.info("This may take several minutes...")
-
+    # Train or load models
+    if train_models:
+        logger.info("Training new ensemble models...")
+        train_metrics = forecaster.train(
+            data=features_df,
+            target_col='usdclp',
+            exog_data=exog_df,
+        )
+        logger.info(f"Training complete. Metrics: {train_metrics}")
+    else:
+        # Try to load existing models
         try:
-            metrics = ensemble.train(
+            forecaster.load_models()
+            logger.info("Loaded existing models")
+        except FileNotFoundError:
+            logger.warning("Models not found - training new models...")
+            train_metrics = forecaster.train(
                 data=features_df,
                 target_col='usdclp',
                 exog_data=exog_df,
-                validation_split=0.2,
-                verbose=verbose,
             )
-
-            logger.info(f"Training complete:")
-            logger.info(f"  Ensemble RMSE: {metrics.ensemble_rmse:.2f} CLP")
-            logger.info(f"  Ensemble MAE:  {metrics.ensemble_mae:.2f} CLP")
-            logger.info(f"  Direction Acc: {metrics.ensemble_directional_accuracy:.1f}%")
-
-            # Save trained model
-            ensemble.save_models(model_dir)
-            logger.info(f"Model saved to {model_dir}")
-
-        except Exception as e:
-            logger.error(f"Training failed: {e}")
-            raise RuntimeError(f"Failed to train ensemble: {e}")
-
-    else:
-        logger.info(f"Loading trained ensemble from {model_dir}...")
-        try:
-            ensemble.load_models(model_dir)
-            logger.info("Model loaded successfully")
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                f"No trained model found at {model_dir}. "
-                f"Run with --train to create one."
-            )
-
-    # Prepare future exogenous variables (if needed)
-    future_exog = None
-    if exog_df is not None and len(exog_df) > 0:
-        # For simplicity, use last known values for future exog
-        # In production, would use actual forecasts/expectations
-        last_exog = exog_df.iloc[-1]
-        future_exog = pd.DataFrame(
-            [last_exog.values] * horizon_days,
-            columns=exog_df.columns,
-        )
-        logger.info(f"Using last known exog values for future forecast")
 
     # Generate forecast
-    logger.info(f"Generating {horizon_days}d forecast...")
+    if verbose:
+        logger.info("Generating ensemble forecast...")
 
-    try:
-        forecast = ensemble.predict(
-            data=features_df,
-            steps=horizon_days,
-            exog_forecast=future_exog,
-        )
+    forecast = forecaster.predict(
+        data=features_df,
+        exog_forecast=exog_df,
+    )
 
-        logger.info(f"Forecast generated:")
-        logger.info(f"  Point forecast: {forecast.ensemble_forecast[-1]:.2f} CLP")
-        logger.info(f"  95% CI: [{forecast.lower_2sigma[-1]:.2f}, {forecast.upper_2sigma[-1]:.2f}]")
+    # Get performance metrics
+    metrics = forecaster.get_metrics()
 
-    except Exception as e:
-        logger.error(f"Forecast generation failed: {e}")
-        raise RuntimeError(f"Failed to generate forecast: {e}")
+    logger.info(
+        f"Forecast generated: {horizon_days} days, "
+        f"Point estimate: {forecast.point_forecast[-1]:.2f} CLP"
+    )
 
-    return forecast, ensemble
+    return forecast, metrics
 
 
 # ============================================================================
 # MARKET SHOCK DETECTION
 # ============================================================================
 
-def detect_market_shocks(features_df: pd.DataFrame, verbose: bool = False) -> list:
+def detect_market_shocks(
+    forecast: EnsembleForecast,
+    features_df: pd.DataFrame,
+    horizon_days: int,
+    verbose: bool = False,
+) -> Dict[str, Any]:
     """
-    Detect market shocks and anomalies.
-
-    Uses MarketShockDetector to identify:
-    - USD/CLP sudden moves
-    - Volatility spikes
-    - Copper shocks
-    - DXY extremes
-    - VIX fear spikes
-    - TPM surprises
+    Detect potential market shocks and anomalies.
 
     Args:
-        features_df: Full feature dataset with latest market data
+        forecast: Ensemble forecast results
+        features_df: DataFrame with current market data
+        horizon_days: Forecast horizon
         verbose: Enable verbose logging
 
     Returns:
-        List of Alert objects (sorted by severity)
+        Dictionary with:
+        - alerts: List of detected alerts
+        - severity: Overall severity (LOW, MEDIUM, HIGH, CRITICAL)
+        - summary: Text summary of market conditions
+        - should_alert: Boolean indicating if email alert needed
     """
     if verbose:
-        logger.info("Running market shock detection...")
+        logger.info("Analyzing market conditions for shocks...")
 
     detector = MarketShockDetector()
 
-    # Prepare data for detector (needs specific columns)
-    detection_df = features_df[['usdclp', 'copper_price', 'dxy', 'vix', 'tpm']].copy()
-    detection_df['date'] = detection_df.index
+    # Get current values
+    current_usdclp = features_df['usdclp'].iloc[-1]
+    current_copper = features_df['copper_price'].iloc[-1] if 'copper_price' in features_df else None
+    current_vix = features_df['vix'].iloc[-1] if 'vix' in features_df else None
 
-    try:
-        alerts = detector.detect_all(detection_df)
+    # Detect shocks
+    alerts = detector.detect_shocks(
+        current_usdclp=current_usdclp,
+        forecast_usdclp=forecast.point_forecast[-1],
+        copper_price=current_copper,
+        vix=current_vix,
+        horizon_days=horizon_days,
+    )
 
-        if alerts:
-            critical = sum(1 for a in alerts if a.severity == AlertSeverity.CRITICAL)
-            warning = sum(1 for a in alerts if a.severity == AlertSeverity.WARNING)
-            info = sum(1 for a in alerts if a.severity == AlertSeverity.INFO)
+    # Determine overall severity
+    if alerts:
+        max_severity = max(alert.severity for alert in alerts)
+        severity_name = max_severity.name
+        should_alert = max_severity >= AlertSeverity.MEDIUM
+    else:
+        severity_name = "NORMAL"
+        should_alert = False
 
-            logger.info(f"Market shock detection complete:")
-            logger.info(f"  {len(alerts)} alerts ({critical} critical, {warning} warning, {info} info)")
+    # Create summary
+    if alerts:
+        summary_lines = [f"Detected {len(alerts)} market condition(s):"]
+        for alert in alerts:
+            summary_lines.append(f"  - {alert.severity.name}: {alert.message}")
+        summary = "\n".join(summary_lines)
+    else:
+        summary = "Normal market conditions - no anomalies detected"
 
-            if verbose:
-                for alert in alerts[:3]:  # Show first 3
-                    logger.info(f"  - [{alert.severity.value}] {alert.message}")
-        else:
-            logger.info("No market shocks detected")
+    logger.info(f"Market analysis: {severity_name} - {len(alerts)} alerts")
 
-    except Exception as e:
-        logger.error(f"Market shock detection failed: {e}")
-        alerts = []
-
-    return alerts
+    return {
+        'alerts': alerts,
+        'severity': severity_name,
+        'summary': summary,
+        'should_alert': should_alert,
+    }
 
 
 # ============================================================================
@@ -463,235 +572,151 @@ def detect_market_shocks(features_df: pd.DataFrame, verbose: bool = False) -> li
 
 def save_results(
     forecast: EnsembleForecast,
-    ensemble: EnsembleForecaster,
-    features_df: pd.DataFrame,
+    metrics: EnsembleMetrics,
+    market_analysis: Dict[str, Any],
     horizon_days: int,
-) -> Dict[str, Any]:
+) -> Path:
     """
-    Save forecast results to JSON file.
+    Save forecast results to JSON and CSV files.
 
-    Creates a comprehensive JSON file with:
-    - Forecast values and confidence intervals
-    - Current market snapshot
-    - Model metadata
-    - System health metrics
+    Creates:
+    - output/forecast_YYYYMMDD_Hd.json: Complete results
+    - output/forecast_YYYYMMDD_Hd.csv: Time series data
+    - output/metrics_YYYYMMDD_Hd.json: Model performance metrics
 
     Args:
-        forecast: EnsembleForecast result
-        ensemble: Trained ensemble model
-        features_df: Feature dataset (for current values)
+        forecast: Ensemble forecast results
+        metrics: Model performance metrics
+        market_analysis: Market shock detection results
         horizon_days: Forecast horizon
 
     Returns:
-        Dictionary with all forecast data (same as saved JSON)
+        Path to main results JSON file
     """
-    logger.info(f"Saving forecast results...")
+    timestamp = datetime.now().strftime("%Y%m%d")
+    prefix = f"forecast_{timestamp}_{horizon_days}d"
 
-    # Get latest values
-    latest = features_df.iloc[-1]
-    current_price = latest['usdclp']
-
-    # Calculate forecast change
-    forecast_price = forecast.ensemble_forecast[-1]
-    change_pct = ((forecast_price - current_price) / current_price) * 100
-
-    # Determine bias
-    if change_pct > 0.5:
-        bias = "ALCISTA"
-    elif change_pct < -0.5:
-        bias = "BAJISTA"
-    else:
-        bias = "NEUTRAL"
-
-    # Determine volatility regime
-    ci_width = forecast.upper_2sigma[-1] - forecast.lower_2sigma[-1]
-    volatility_pct = (ci_width / forecast_price) * 100
-
-    if volatility_pct < 2.0:
-        volatility = "BAJA"
-    elif volatility_pct < 4.0:
-        volatility = "MEDIA"
-    else:
-        volatility = "ALTA"
-
-    # Get model contributions
-    contributions = ensemble.get_model_contributions()
-
-    # Build result dict
-    result = {
-        "generated_at": datetime.now().isoformat(),
-        "horizon": f"{horizon_days}d",
-        "horizon_days": horizon_days,
-
-        # Current state
-        "current_price": float(current_price),
-        "current_date": str(features_df.index[-1].date()),
-
-        # Forecast
-        "forecast_price": float(forecast_price),
-        "forecast_dates": [str(d.date()) for d in forecast.dates],
-        "forecast_values": forecast.ensemble_forecast.tolist(),
-
-        # Confidence intervals
-        "ci95_low": float(forecast.lower_2sigma[-1]),
-        "ci95_high": float(forecast.upper_2sigma[-1]),
-        "ci68_low": float(forecast.lower_1sigma[-1]),
-        "ci68_high": float(forecast.upper_1sigma[-1]),
-
-        # Metadata
-        "change_pct": float(change_pct),
-        "bias": bias,
-        "volatility": volatility,
-        "volatility_regime": forecast.volatility_regime,
-
-        # Model info
-        "weights_used": forecast.weights_used,
-        "xgboost_forecast": forecast.xgboost_forecast.tolist() if forecast.xgboost_forecast is not None else None,
-        "sarimax_forecast": forecast.sarimax_forecast.tolist() if forecast.sarimax_forecast is not None else None,
-
-        # Model health
-        "model_contributions": contributions,
-
-        # Market snapshot
-        "market_data": {
-            "copper_price": float(latest.get('copper_price', 0)),
-            "dxy": float(latest.get('dxy', 0)),
-            "vix": float(latest.get('vix', 0)),
-            "tpm": float(latest.get('tpm', 0)),
+    # Save main results (JSON)
+    results = {
+        'timestamp': datetime.now().isoformat(),
+        'horizon_days': horizon_days,
+        'forecast': {
+            'point': forecast.point_forecast.tolist(),
+            'lower_bound': forecast.lower_bound.tolist(),
+            'upper_bound': forecast.upper_bound.tolist(),
+            'dates': [d.isoformat() for d in forecast.dates],
+        },
+        'weights': forecast.weights,
+        'market_analysis': {
+            'severity': market_analysis['severity'],
+            'summary': market_analysis['summary'],
+            'alert_count': len(market_analysis['alerts']),
         },
     }
 
-    # Save to JSON
-    output_file = OUTPUT_DIR / f"forecast_{horizon_days}d.json"
-    with open(output_file, 'w') as f:
-        json.dump(result, f, indent=2, default=str)
+    json_path = OUTPUT_DIR / f"{prefix}.json"
+    with open(json_path, 'w') as f:
+        json.dump(results, f, indent=2)
 
-    logger.info(f"Results saved to {output_file}")
+    logger.info(f"Results saved to {json_path}")
 
-    # Log to PredictionTracker so email system can consume it
-    try:
-        from forex_core.mlops.tracking import PredictionTracker
+    # Save time series (CSV)
+    forecast_df = pd.DataFrame({
+        'date': forecast.dates,
+        'point_forecast': forecast.point_forecast,
+        'lower_bound': forecast.lower_bound,
+        'upper_bound': forecast.upper_bound,
+    })
 
-        predictions_dir = DATA_DIR / "predictions"
-        predictions_dir.mkdir(parents=True, exist_ok=True)
-        predictions_path = predictions_dir / "predictions.parquet"
+    csv_path = OUTPUT_DIR / f"{prefix}.csv"
+    forecast_df.to_csv(csv_path, index=False)
 
-        tracker = PredictionTracker(storage_path=predictions_path)
-        tracker.log_prediction(
-            forecast_date=datetime.now(),
-            horizon=f"{horizon_days}d",
-            target_date=forecast.dates[-1],
-            predicted_mean=float(forecast_price),
-            ci95_low=float(forecast.lower_2sigma[-1]),
-            ci95_high=float(forecast.upper_2sigma[-1]),
-        )
-        logger.info(f"Prediction logged to tracker: {predictions_path}")
-    except Exception as e:
-        logger.warning(f"Failed to log prediction to tracker: {e}")
-        # Don't fail the entire workflow if tracking fails
+    logger.info(f"Time series saved to {csv_path}")
 
-    return result
+    # Save metrics (JSON)
+    metrics_dict = {
+        'xgboost': metrics.xgboost_metrics,
+        'sarimax': metrics.sarimax_metrics,
+        'garch': metrics.garch_metrics,
+        'ensemble': metrics.ensemble_metrics,
+    }
+
+    metrics_path = OUTPUT_DIR / f"metrics_{timestamp}_{horizon_days}d.json"
+    with open(metrics_path, 'w') as f:
+        json.dump(metrics_dict, f, indent=2)
+
+    logger.info(f"Metrics saved to {metrics_path}")
+
+    return json_path
 
 
 # ============================================================================
-# EMAIL SENDING
+# EMAIL DELIVERY
 # ============================================================================
 
-def send_forecast_email(forecast_data: Dict[str, Any], horizon_days: int) -> bool:
+def send_forecast_email(
+    forecast: EnsembleForecast,
+    market_analysis: Dict[str, Any],
+    horizon_days: int,
+    test_mode: bool = False,
+) -> bool:
     """
-    Send forecast email via test_email_and_pdf.py.
-
-    This function does NOT duplicate email generation logic.
-    It simply calls the existing test_email_and_pdf.py script with
-    the forecast data.
+    Send forecast email using test_email_and_pdf.py script.
 
     Args:
-        forecast_data: Dictionary with forecast results (from save_results)
+        forecast: Ensemble forecast results
+        market_analysis: Market shock detection results
         horizon_days: Forecast horizon
+        test_mode: If True, sends to test recipients only
 
     Returns:
         True if email sent successfully, False otherwise
     """
     if not EMAIL_SCRIPT.exists():
-        logger.warning(f"Email script not found: {EMAIL_SCRIPT}")
+        logger.error(f"Email script not found: {EMAIL_SCRIPT}")
         return False
 
-    logger.info(f"Sending forecast email via {EMAIL_SCRIPT.name}...")
+    # Prepare data for email script
+    email_data = {
+        'horizon_days': horizon_days,
+        'current_rate': float(forecast.point_forecast[0]),
+        'forecast_rate': float(forecast.point_forecast[-1]),
+        'lower_bound': float(forecast.lower_bound[-1]),
+        'upper_bound': float(forecast.upper_bound[-1]),
+        'severity': market_analysis['severity'],
+        'alert_summary': market_analysis['summary'],
+        'timestamp': datetime.now().isoformat(),
+    }
+
+    # Save data for email script
+    email_data_path = OUTPUT_DIR / "email_data.json"
+    with open(email_data_path, 'w') as f:
+        json.dump(email_data, f, indent=2)
+
+    # Run email script
+    cmd = [
+        sys.executable,
+        str(EMAIL_SCRIPT),
+        "--data", str(email_data_path),
+        f"--horizon={horizon_days}",
+    ]
+
+    if test_mode:
+        cmd.append("--test")
 
     try:
-        # The email script expects --horizon argument
-        cmd = [
-            sys.executable,
-            str(EMAIL_SCRIPT),
-            "--horizon", f"{horizon_days}d",
-        ]
+        logger.info(f"Running email script: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
 
-        # Run email script
-        result = subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=120,  # 2 minute timeout
-        )
-
-        logger.info("Email script executed successfully")
-
-        if result.stdout:
-            logger.debug(f"Email script output: {result.stdout}")
-
-        return True
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Email script failed with code {e.returncode}")
-        if e.stderr:
-            logger.error(f"Error output: {e.stderr}")
-        return False
-
-    except subprocess.TimeoutExpired:
-        logger.error("Email script timed out (>2 minutes)")
-        return False
+        if result.returncode == 0:
+            logger.info("Email sent successfully")
+            return True
+        else:
+            logger.error(f"Email script failed: {result.stderr}")
+            return False
 
     except Exception as e:
-        logger.error(f"Unexpected error sending email: {e}")
-        return False
-
-
-def send_alert_email(alerts: list, market_data: Dict[str, Any]) -> bool:
-    """
-    Send market shock alert email.
-
-    Args:
-        alerts: List of Alert objects from MarketShockDetector
-        market_data: Current market snapshot
-
-    Returns:
-        True if email sent successfully, False otherwise
-    """
-    if not alerts:
-        logger.info("No alerts to send")
-        return False
-
-    logger.info(f"Generating market shock alert email ({len(alerts)} alerts)...")
-
-    try:
-        html, pdf_bytes = generate_market_shock_email(alerts, market_data)
-
-        # Save HTML for inspection
-        alert_file = OUTPUT_DIR / f"alert_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-        with open(alert_file, 'w', encoding='utf-8') as f:
-            f.write(html)
-
-        logger.info(f"Alert email saved to {alert_file}")
-
-        # TODO: Integrate with actual email sender
-        # For now, just save the file
-        logger.warning("Alert email sending not yet implemented - saved to file only")
-
-        return True
-
-    except Exception as e:
-        logger.error(f"Failed to generate alert email: {e}")
+        logger.error(f"Failed to run email script: {e}")
         return False
 
 
@@ -701,53 +726,46 @@ def send_alert_email(alerts: list, market_data: Dict[str, Any]) -> bool:
 
 def main():
     """
-    Main forecasting workflow.
+    Main workflow orchestrator.
 
-    Steps:
-    1. Parse CLI arguments
+    Executes complete forecasting pipeline:
+    1. Parse arguments
     2. Load and prepare data
-    3. Generate forecast
+    3. Generate ensemble forecast
     4. Detect market shocks
     5. Save results
-    6. Send email
-
-    Each step logs progress and handles errors gracefully.
+    6. Send email (optional)
     """
     # Parse arguments
     parser = argparse.ArgumentParser(
         description="USD/CLP Ensemble Forecasting System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Generate 7-day forecast
-  %(prog)s --horizon 7
-
-  # Generate 30-day forecast without email
-  %(prog)s --horizon 30 --no-email
-
-  # Train new model and forecast
-  %(prog)s --horizon 15 --train -v
-        """,
     )
 
     parser.add_argument(
         "--horizon",
         type=int,
-        required=True,
         choices=[7, 15, 30, 90],
-        help="Forecast horizon in days (7, 15, 30, or 90)",
+        default=7,
+        help="Forecast horizon in days (default: 7)",
     )
 
     parser.add_argument(
         "--train",
         action="store_true",
-        help="Train new ensemble model (default: load existing)",
+        help="Train new models (default: use existing)",
     )
 
     parser.add_argument(
         "--no-email",
         action="store_true",
-        help="Skip sending forecast email",
+        help="Skip email delivery",
+    )
+
+    parser.add_argument(
+        "--test-email",
+        action="store_true",
+        help="Send email to test recipients only",
     )
 
     parser.add_argument(
@@ -760,116 +778,99 @@ Examples:
 
     # Configure logging
     if args.verbose:
-        logger.remove()
         logger.add(sys.stderr, level="DEBUG")
     else:
-        logger.remove()
         logger.add(sys.stderr, level="INFO")
 
-    # Start workflow
-    horizon_days = args.horizon
-
-    logger.info("=" * 70)
-    logger.info(f"USD/CLP Ensemble Forecasting System - {horizon_days}d Horizon")
-    logger.info("=" * 70)
-    logger.info(f"Environment: {'Docker' if IS_DOCKER else 'Local'}")
-    logger.info(f"Data dir: {DATA_DIR}")
-    logger.info(f"Models dir: {MODELS_DIR}")
-    logger.info(f"Output dir: {OUTPUT_DIR}")
-    logger.info("")
+    logger.info(
+        f"\n{'='*60}\n"
+        f"USD/CLP Ensemble Forecast - {args.horizon} days\n"
+        f"{'='*60}"
+    )
 
     try:
-        # STEP 1: Load and prepare data
-        logger.info("STEP 1/6: Loading and preparing data...")
-        features_df, exog_df = load_and_prepare_data(horizon_days, args.verbose)
-        logger.info(f"✓ Data prepared: {len(features_df)} rows, {len(features_df.columns)} features")
-        logger.info("")
-
-        # STEP 2: Generate forecast
-        logger.info("STEP 2/6: Generating forecast...")
-        forecast, ensemble = generate_forecast(
-            features_df,
-            exog_df,
-            horizon_days,
-            train=args.train,
+        # Step 1: Load and prepare data
+        logger.info("\n[1/5] Loading and preparing data...")
+        features_df, exog_df = load_and_prepare_data(
+            horizon_days=args.horizon,
             verbose=args.verbose,
         )
-        logger.info(f"✓ Forecast generated: {forecast.ensemble_forecast[-1]:.2f} CLP")
-        logger.info("")
 
-        # STEP 3: Detect market shocks
-        logger.info("STEP 3/6: Detecting market shocks...")
-        alerts = detect_market_shocks(features_df, args.verbose)
-        logger.info(f"✓ Market shock detection complete: {len(alerts)} alerts")
-        logger.info("")
+        # Check if we have sufficient data after feature engineering
+        if len(features_df) < MIN_PREDICTION_DAYS:
+            raise ValueError(
+                f"Insufficient data after feature engineering: {len(features_df)} rows "
+                f"(need >= {MIN_PREDICTION_DAYS})"
+            )
 
-        # STEP 4: Save results
-        logger.info("STEP 4/6: Saving results...")
-        forecast_data = save_results(forecast, ensemble, features_df, horizon_days)
-        logger.info("✓ Results saved")
-        logger.info("")
+        # Step 2: Generate forecast
+        logger.info("\n[2/5] Generating ensemble forecast...")
+        forecast, metrics = generate_forecast(
+            features_df=features_df,
+            exog_df=exog_df,
+            horizon_days=args.horizon,
+            train_models=args.train,
+            verbose=args.verbose,
+        )
 
-        # STEP 5: Send alerts if any
-        if alerts:
-            logger.info("STEP 5/6: Sending market shock alerts...")
-            market_data = {
-                "usdclp": forecast_data["current_price"],
-                "copper_price": forecast_data["market_data"]["copper_price"],
-                "dxy": forecast_data["market_data"]["dxy"],
-                "vix": forecast_data["market_data"]["vix"],
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            }
-            send_alert_email(alerts, market_data)
-            logger.info("")
-        else:
-            logger.info("STEP 5/6: No market shocks - skipping alert email")
-            logger.info("")
+        # Step 3: Detect market shocks
+        logger.info("\n[3/5] Analyzing market conditions...")
+        market_analysis = detect_market_shocks(
+            forecast=forecast,
+            features_df=features_df,
+            horizon_days=args.horizon,
+            verbose=args.verbose,
+        )
 
-        # STEP 6: Send forecast email
+        # Step 4: Save results
+        logger.info("\n[4/5] Saving results...")
+        results_path = save_results(
+            forecast=forecast,
+            metrics=metrics,
+            market_analysis=market_analysis,
+            horizon_days=args.horizon,
+        )
+
+        # Step 5: Send email (optional)
         if not args.no_email:
-            logger.info("STEP 6/6: Sending forecast email...")
-            email_sent = send_forecast_email(forecast_data, horizon_days)
-            if email_sent:
-                logger.info("✓ Forecast email sent")
-            else:
-                logger.warning("⚠ Forecast email failed (not critical)")
+            logger.info("\n[5/5] Sending forecast email...")
+            email_sent = send_forecast_email(
+                forecast=forecast,
+                market_analysis=market_analysis,
+                horizon_days=args.horizon,
+                test_mode=args.test_email,
+            )
+
+            if not email_sent:
+                logger.warning("Email delivery failed - check logs")
         else:
-            logger.info("STEP 6/6: Email sending skipped (--no-email)")
+            logger.info("\n[5/5] Skipping email delivery (--no-email)")
 
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info("✅ FORECAST WORKFLOW COMPLETED SUCCESSFULLY")
-        logger.info("=" * 70)
-        logger.info("")
-        logger.info("Summary:")
-        logger.info(f"  Current:  ${forecast_data['current_price']:.2f} CLP")
-        logger.info(f"  Forecast: ${forecast_data['forecast_price']:.2f} CLP ({forecast_data['change_pct']:+.1f}%)")
-        logger.info(f"  95% CI:   ${forecast_data['ci95_low']:.0f} - ${forecast_data['ci95_high']:.0f}")
-        logger.info(f"  Bias:     {forecast_data['bias']}")
-        logger.info(f"  Volatility: {forecast_data['volatility']}")
-        logger.info(f"  Alerts:   {len(alerts)} detected")
-        logger.info("")
-        logger.info(f"Results: {OUTPUT_DIR / f'forecast_{horizon_days}d.json'}")
+        # Summary
+        logger.info(
+            f"\n{'='*60}\n"
+            f"FORECAST COMPLETE\n"
+            f"{'='*60}\n"
+            f"Horizon: {args.horizon} days\n"
+            f"Current rate: {features_df['usdclp'].iloc[-1]:.2f} CLP\n"
+            f"Forecast: {forecast.point_forecast[-1]:.2f} CLP\n"
+            f"Range: [{forecast.lower_bound[-1]:.2f}, {forecast.upper_bound[-1]:.2f}]\n"
+            f"Market condition: {market_analysis['severity']}\n"
+            f"Results: {results_path}\n"
+            f"{'='*60}"
+        )
 
-        sys.exit(0)
+        # Exit with appropriate code
+        if market_analysis['should_alert']:
+            sys.exit(2)  # Alert condition
+        else:
+            sys.exit(0)  # Success
 
     except Exception as e:
-        logger.error("")
-        logger.error("=" * 70)
-        logger.error("❌ FORECAST WORKFLOW FAILED")
-        logger.error("=" * 70)
-        logger.error(f"Error: {e}")
-        logger.error("")
-        logger.error("Troubleshooting:")
-        logger.error("  1. Check data availability in " + str(DATA_DIR))
-        logger.error("  2. Verify model exists in " + str(MODELS_DIR / f"ensemble_{horizon_days}d"))
-        logger.error("  3. Run with --train to create new model")
-        logger.error("  4. Run with -v for verbose logging")
-        logger.error("")
-
-        # Try to send failure alert
-        # (Would integrate with alert system here)
-
+        logger.error(f"\n{'!'*60}")
+        logger.error(f"FORECAST FAILED: {e}")
+        logger.error(f"{'!'*60}")
+        logger.exception("Full traceback:")
         sys.exit(1)
 
 
