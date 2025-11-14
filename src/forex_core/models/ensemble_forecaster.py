@@ -315,6 +315,13 @@ class EnsembleForecaster:
         if target_col not in data.columns:
             raise ValueError(f"Target column '{target_col}' not found")
 
+        # IMPORTANT: Ensure 'value' column exists for adaptive window calculation
+        # If not present, create it from target_col (raw values for trend detection)
+        if 'value' not in data.columns:
+            logger.info(f"Adding 'value' column from '{target_col}' for adaptive window")
+            data = data.copy()  # Avoid modifying original
+            data['value'] = data[target_col]
+
         # Split data for validation
         split_idx = int(len(data) * (1 - validation_split))
         train_data = data.iloc[:split_idx]
