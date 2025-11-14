@@ -730,7 +730,7 @@ def generate_pdf_html(data: dict) -> str:
     for driver in data['drivers']:
         html += f"            <li>{driver}</li>\n"
 
-    html += """        </ol>
+    html += f"""        </ol>
     </div>
 
     <div class="page-break"></div>
