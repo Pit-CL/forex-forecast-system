@@ -639,7 +639,9 @@ class SARIMAXForecaster:
 
             # Create result DataFrame
             # Check if model has data with dates, otherwise use current date
-            if hasattr(self.model, 'data') and self.model.data is not None and hasattr(self.model.data, 'dates'):
+            if (hasattr(self.model, 'data') and self.model.data is not None and
+                hasattr(self.model.data, 'dates') and self.model.data.dates is not None and
+                len(self.model.data.dates) > 0):
                 last_date = self.model.data.dates[-1]
             else:
                 last_date = datetime.now()
