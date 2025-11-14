@@ -203,47 +203,80 @@ def _send_email(
     service_config,
 ) -> None:
     """
-    Send email notification with report attached, including executive summary.
+    Send unified email notification with HTML content and simple PDF.
+
+    Strategy:
+    1. report_path (large PDF) is saved for internal reference only
+    2. Generate email HTML + small PDF using test_email_and_pdf.py
+    3. Send using send_unified_email.py with CID image embeddings
 
     Args:
         settings: System settings with email configuration
-        report_path: Path to generated PDF report
+        report_path: Path to generated large PDF report (for internal use)
         bundle: DataBundle with market data
         forecast: ForecastPackage with forecast results
         service_config: Service configuration with horizon info
     """
-    from forex_core.mlops.alerts import AlertManager
-    from forex_core.notifications.email import EmailSender
+    import subprocess
+    from pathlib import Path
 
-    # Evaluate alert conditions
-    alert_manager = AlertManager(data_dir=settings.data_dir)
-    alert_decision = alert_manager.evaluate_alert(
-        horizon=service_config.horizon_code,
-        forecast=forecast,
-        bundle=bundle,
-    )
+    # Log that large PDF was saved for internal reference
+    logger.info(f"Large PDF report saved for internal reference: {report_path}")
 
-    # Log alert decision
-    alert_manager.log_alert_decision(alert_decision, service_config.horizon_code)
+    # Generate email HTML + small PDF for email
+    logger.info(f"Generating email content for horizon: {service_config.horizon_code}")
 
-    # Log summary to console
-    if alert_decision.should_alert:
-        logger.warning(
-            f"Alert triggered: {alert_decision.reason} "
-            f"(severity: {alert_decision.severity.value})"
+    project_root = Path(__file__).parent.parent.parent.parent
+    horizon = service_config.horizon_code
+
+    try:
+        # Step 1: Generate email HTML + small PDF using test_email_and_pdf.py
+        result = subprocess.run(
+            ["python3", str(project_root / "scripts" / "test_email_and_pdf.py"), "--horizon", horizon],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=True,
         )
-    else:
-        logger.info(f"No alert: {alert_decision.reason}")
+        logger.info(f"Email content generation output:\n{result.stdout}")
 
-    # Send email with alert context
-    sender = EmailSender(settings)
-    sender.send(
-        report_path=report_path,
-        bundle=bundle,
-        forecast=forecast,
-        horizon=service_config.horizon_code,
-        alert_decision=alert_decision,
-    )
+        # Step 2: Find generated files
+        email_html_path = project_root / "output" / f"email_{horizon}.html"
+        small_pdf_path = project_root / "output" / f"report_{horizon}.pdf"
+
+        if not email_html_path.exists():
+            raise FileNotFoundError(f"Email HTML not found: {email_html_path}")
+        if not small_pdf_path.exists():
+            raise FileNotFoundError(f"Small PDF not found: {small_pdf_path}")
+
+        logger.info(f"Email HTML generated: {email_html_path}")
+        logger.info(f"Small PDF generated: {small_pdf_path}")
+
+        # Step 3: Send email using unified email sender with CID
+        logger.info("Sending email with CID image embedding...")
+        result = subprocess.run(
+            [
+                "python3",
+                str(project_root / "scripts" / "send_unified_email.py"),
+                str(email_html_path),
+                str(small_pdf_path),
+            ],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        logger.info(f"Email sending output:\n{result.stdout}")
+        logger.success("Unified email sent successfully with CID images")
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to generate/send email: {e}")
+        logger.error(f"stdout: {e.stdout}")
+        logger.error(f"stderr: {e.stderr}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in email sending: {e}")
+        raise
 
 
 def _log_predictions(
