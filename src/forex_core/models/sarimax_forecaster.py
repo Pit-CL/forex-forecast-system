@@ -438,7 +438,8 @@ class SARIMAXForecaster:
 
         # Extract exogenous variables
         exog = None
-        if exog_data is not None and len(self.config.exog_vars) > 0:
+        # Only use exog vars if explicitly configured AND exog_data is provided
+        if len(self.config.exog_vars) > 0 and exog_data is not None:
             available_vars = [v for v in self.config.exog_vars if v in exog_data.columns]
 
             if len(available_vars) < len(self.config.exog_vars):
@@ -453,9 +454,12 @@ class SARIMAXForecaster:
                 logger.warning("No exogenous variables available, training without exog")
                 self.exog_columns = None  # Explicitly clear exog columns
         else:
-            # No exog data or no exog vars in config - train univariate
+            # No exog vars in config or no exog_data - train univariate
             self.exog_columns = None
-            logger.info("Training SARIMAX as univariate model (no exogenous variables)")
+            if len(self.config.exog_vars) == 0:
+                logger.info("Training SARIMAX as univariate model (config.exog_vars is empty)")
+            else:
+                logger.info("Training SARIMAX as univariate model (no exog_data provided)")
 
         # Handle missing values
         if endog.isna().any():
