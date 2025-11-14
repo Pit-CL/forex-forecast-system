@@ -1,0 +1,71 @@
+# USD/CLP 30-Day Forecast - Optimized Schedule
+# Monthly treasury planning horizon
+# All times in UTC (adjust for Chile time: UTC-3 summer, UTC-4 winter)
+
+# ============================================================================
+# FORECAST GENERATION
+# ============================================================================
+
+# Generate 30-day forecast - Daily at 19:00 Chile (22:00 UTC summer)
+# Runs after 7d and 15d to avoid resource contention
+0 22 * * 1-5 cd /app && PYTHONPATH=/app/src python /app/scripts/forecast_with_ensemble.py --horizon 30 >> /var/log/cron.log 2>&1
+
+# ============================================================================
+# EMAIL DELIVERY - STRATEGIC MONTHLY UPDATES
+# ============================================================================
+
+# Thursday Monthly Update - 07:30 Chile (10:30 UTC summer)
+# Only on 1st and 15th of month for mid-month and month-end planning
+30 10 1,15 * 4 cd /app && PYTHONPATH=/app/src python /app/scripts/send_unified_email.py --horizon 30d --attach-pdf --monthly-analysis >> /var/log/email.log 2>&1
+
+# Friday Weekly Summary - 07:30 Chile (10:30 UTC summer)
+# Every Friday for monthly rolling view
+30 10 * * 5 cd /app && PYTHONPATH=/app/src python /app/scripts/send_unified_email.py --horizon 30d --attach-pdf >> /var/log/email.log 2>&1
+
+# ============================================================================
+# MODEL MAINTENANCE
+# ============================================================================
+
+# Weekly XGBoost re-training - Sunday 03:00 Chile (06:00 UTC summer)
+0 6 * * 0 cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_xgboost.py --horizon 30 >> /var/log/retrain.log 2>&1
+
+# Monthly SARIMAX re-training - 1st of month, 01:00 Chile (04:00 UTC)
+# Critical for capturing seasonal patterns
+0 4 1 * * cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_sarimax.py --horizon 30 >> /var/log/retrain.log 2>&1
+
+# Monthly LSTM re-training - 2nd Sunday, 04:00 Chile (07:00 UTC)
+0 7 8-14 * 0 cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_lstm.py --horizon 30 >> /var/log/retrain.log 2>&1
+
+# ============================================================================
+# PERFORMANCE ANALYSIS
+# ============================================================================
+
+# Monthly performance report - 1st of month, 06:00 Chile (09:00 UTC)
+0 9 1 * * cd /app && PYTHONPATH=/app/src python /app/scripts/generate_monthly_performance.py --horizon 30 >> /var/log/performance.log 2>&1
+
+# Weekly accuracy check - Mondays 05:00 Chile (08:00 UTC)
+0 8 * * 1 cd /app && PYTHONPATH=/app/src python /app/scripts/check_forecast_accuracy.py --horizon 30 --lookback 30 >> /var/log/accuracy.log 2>&1
+
+# ============================================================================
+# SYSTEM HEALTH
+# ============================================================================
+
+# Hourly health check
+0 * * * * date > /tmp/healthcheck
+
+# Daily performance metrics - 23:30 Chile (02:30 UTC summer)
+30 2 * * * cd /app && PYTHONPATH=/app/src python /app/scripts/calculate_daily_metrics.py --horizon 30 >> /var/log/metrics.log 2>&1
+
+# ============================================================================
+# DATA MANAGEMENT
+# ============================================================================
+
+# Monthly data archival - Last day of month, 22:00 Chile
+0 1 28-31 * * [ $(date +\%d -d tomorrow) = 01 ] && cd /app && ./scripts/archive_monthly_data.sh >> /var/log/archive.log 2>&1
+
+# ============================================================================
+# LOG ROTATION
+# ============================================================================
+
+# Rotate logs weekly - Sunday 03:00 Chile
+0 6 * * 0 cd /app && ./scripts/rotate_logs.sh >> /var/log/maintenance.log 2>&1

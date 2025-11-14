@@ -1,0 +1,59 @@
+# USD/CLP 7-Day Forecast - Optimized Schedule
+# Market-driven timing for maximum impact
+# All times in UTC (adjust for Chile time: UTC-3 summer, UTC-4 winter)
+
+# ============================================================================
+# FORECAST GENERATION
+# ============================================================================
+
+# Generate 7-day forecast - Daily at 18:30 Chile (21:30 UTC summer)
+# Runs Mon-Fri after market close when all data is available
+30 21 * * 1-5 cd /app && PYTHONPATH=/app/src python /app/scripts/forecast_with_ensemble.py --horizon 7 >> /var/log/cron.log 2>&1
+
+# ============================================================================
+# EMAIL DELIVERY - STRATEGIC TIMING
+# ============================================================================
+
+# Monday Morning Planning Email - 07:30 Chile (10:30 UTC summer)
+# Comprehensive view for weekly planning meetings
+30 10 * * 1 cd /app && PYTHONPATH=/app/src python /app/scripts/send_unified_email.py --horizon 7d --attach-pdf >> /var/log/email.log 2>&1
+
+# Wednesday Tactical Update - 07:30 Chile (10:30 UTC summer)
+# Mid-week check, PDF only if high volatility
+30 10 * * 3 cd /app && PYTHONPATH=/app/src python /app/scripts/send_unified_email.py --horizon 7d --conditional-pdf >> /var/log/email.log 2>&1
+
+# Friday Weekly Wrap-up - 07:30 Chile (10:30 UTC summer)
+# Complete weekly summary with PDF
+30 10 * * 5 cd /app && PYTHONPATH=/app/src python /app/scripts/send_unified_email.py --horizon 7d --attach-pdf --weekly-summary >> /var/log/email.log 2>&1
+
+# ============================================================================
+# MODEL MAINTENANCE
+# ============================================================================
+
+# Weekly XGBoost re-training - Sunday 02:00 Chile (05:00 UTC summer)
+# Ensures fresh model for Monday forecasts
+0 5 * * 0 cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_xgboost.py --horizon 7 >> /var/log/retrain.log 2>&1
+
+# ============================================================================
+# SYSTEM HEALTH
+# ============================================================================
+
+# Hourly health check
+0 * * * * date > /tmp/healthcheck
+
+# Daily performance metrics - 23:00 Chile (02:00 UTC summer)
+0 2 * * * cd /app && PYTHONPATH=/app/src python /app/scripts/calculate_daily_metrics.py --horizon 7 >> /var/log/metrics.log 2>&1
+
+# ============================================================================
+# ALERTS AND MONITORING
+# ============================================================================
+
+# Market volatility check - Every 30 minutes during market hours
+*/30 12-20 * * 1-5 cd /app && PYTHONPATH=/app/src python /app/scripts/check_volatility_alerts.py --horizon 7 >> /var/log/alerts.log 2>&1
+
+# ============================================================================
+# LOG ROTATION
+# ============================================================================
+
+# Rotate logs weekly - Sunday 03:00 Chile
+0 6 * * 0 cd /app && ./scripts/rotate_logs.sh >> /var/log/maintenance.log 2>&1

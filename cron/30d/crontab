@@ -1,6 +1,19 @@
-# USD/CLP 30-Day Forecast - Day 1 at 9:30 AM Chile time
-30 9 1 * * cd /app && python -m services.forecaster_30d.cli run >> /var/log/cron.log 2>&1
+# USD/CLP 30-Day Forecast - Optimized Schedule (Strategy by @agent-usdclp)
+# Emails sent on Thursday 1st/15th and every Friday at 07:30 Chile time
+
+# Forecast generation: Thursday 1st and 15th + Every Friday at 7:00 AM Chile
+0 7 1,15 * 4 cd /app && PYTHONPATH=/app/src python /app/scripts/forecast_with_ensemble.py --horizon 30 >> /var/log/cron.log 2>&1
+0 7 * * 5 cd /app && PYTHONPATH=/app/src python /app/scripts/forecast_with_ensemble.py --horizon 30 >> /var/log/cron.log 2>&1
+
+# Email dispatch: 7:30 AM after forecast completes
+30 7 1,15 * 4 cd /app && PYTHONPATH=/app/src python /app/scripts/send_daily_email.sh --horizon 30d >> /var/log/cron.log 2>&1
+30 7 * * 5 cd /app && PYTHONPATH=/app/src python /app/scripts/send_daily_email.sh --horizon 30d >> /var/log/cron.log 2>&1
+
+# Weekly XGBoost re-training - Sunday 00:00 Chile (03:00 UTC)
+0 3 * * 0 cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_xgboost.py --horizon 30 >> /var/log/cron.log 2>&1
+
+# Monthly SARIMAX re-training - 1st of month, 01:00 Chile (04:00 UTC)
+0 4 1 * * cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_sarimax.py --horizon 30 >> /var/log/cron.log 2>&1
 
 # Health check - write timestamp every hour
 0 * * * * date > /tmp/healthcheck
-

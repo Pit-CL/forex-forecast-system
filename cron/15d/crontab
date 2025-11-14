@@ -1,6 +1,14 @@
-# USD/CLP 15-Day Forecast - Day 1 and 15 at 9:00 AM Chile time
-0 9 1,15 * * cd /app && python -m services.forecaster_15d.cli run >> /var/log/cron.log 2>&1
+# USD/CLP 15-Day Forecast - Optimized Schedule (Strategy by @agent-usdclp)
+# Emails sent Monday and Thursday at 07:30 Chile time
+
+# Forecast generation: Monday and Thursday at 7:00 AM Chile
+0 7 * * 1,4 cd /app && PYTHONPATH=/app/src python /app/scripts/forecast_with_ensemble.py --horizon 15 >> /var/log/cron.log 2>&1
+
+# Email dispatch: 7:30 AM after forecast completes
+30 7 * * 1,4 cd /app && PYTHONPATH=/app/src python /app/scripts/send_daily_email.sh --horizon 15d >> /var/log/cron.log 2>&1
+
+# Weekly XGBoost re-training - Sunday 00:00 Chile (03:00 UTC)
+0 3 * * 0 cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_xgboost.py --horizon 15 >> /var/log/cron.log 2>&1
 
 # Health check - write timestamp every hour
 0 * * * * date > /tmp/healthcheck
-

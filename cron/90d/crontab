@@ -1,10 +1,17 @@
-# USD/CLP 90-Day Forecast - Quarterly, 2 days after BCCh RPM at 10:00 AM Chile time
-# Q1: Jan 30 (after Jan 27-28 meeting)
-# Q2: Apr 30 (after Apr 28-29 meeting)
-# Q3: Jul 30 (after Jul 28-29 meeting)
-# Q4: Oct 30 (after Oct 27-28 meeting)
-0 10 30 1,4,7,10 * cd /app && python -m services.forecaster_90d.cli run >> /var/log/cron.log 2>&1
+# USD/CLP 90-Day Forecast - Optimized Schedule (Strategy by @agent-usdclp)
+# Email sent first Tuesday of each month at 07:30 Chile time
+
+# Forecast generation: First Tuesday of month at 7:00 AM Chile (days 1-7, Tuesday=2)
+0 7 1-7 * 2 cd /app && PYTHONPATH=/app/src python /app/scripts/forecast_with_ensemble.py --horizon 90 >> /var/log/cron.log 2>&1
+
+# Email dispatch: 7:30 AM after forecast completes
+30 7 1-7 * 2 cd /app && PYTHONPATH=/app/src python /app/scripts/send_daily_email.sh --horizon 90d >> /var/log/cron.log 2>&1
+
+# Weekly XGBoost re-training - Sunday 00:00 Chile (03:00 UTC)
+0 3 * * 0 cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_xgboost.py --horizon 90 >> /var/log/cron.log 2>&1
+
+# Monthly SARIMAX re-training - 1st of month, 01:00 Chile (04:00 UTC)
+0 4 1 * * cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_sarimax.py --horizon 90 >> /var/log/cron.log 2>&1
 
 # Health check - write timestamp every hour
 0 * * * * date > /tmp/healthcheck
-

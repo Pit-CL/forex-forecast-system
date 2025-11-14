@@ -1,0 +1,58 @@
+# USD/CLP 15-Day Forecast - Optimized Schedule
+# Medium-term planning horizon with bi-weekly updates
+# All times in UTC (adjust for Chile time: UTC-3 summer, UTC-4 winter)
+
+# ============================================================================
+# FORECAST GENERATION
+# ============================================================================
+
+# Generate 15-day forecast - Daily at 18:45 Chile (21:45 UTC summer)
+# Runs slightly after 7d to avoid resource contention
+45 21 * * 1-5 cd /app && PYTHONPATH=/app/src python /app/scripts/forecast_with_ensemble.py --horizon 15 >> /var/log/cron.log 2>&1
+
+# ============================================================================
+# EMAIL DELIVERY - BI-WEEKLY STRATEGIC UPDATES
+# ============================================================================
+
+# Monday Morning Planning Email - 07:30 Chile (10:30 UTC summer)
+# Part of comprehensive weekly planning package
+30 10 * * 1 cd /app && PYTHONPATH=/app/src python /app/scripts/send_unified_email.py --horizon 15d --attach-pdf >> /var/log/email.log 2>&1
+
+# Thursday Strategic Update - 07:30 Chile (10:30 UTC summer)
+# Forward-looking view for end-of-week positioning
+30 10 * * 4 cd /app && PYTHONPATH=/app/src python /app/scripts/send_unified_email.py --horizon 15d --attach-pdf >> /var/log/email.log 2>&1
+
+# ============================================================================
+# MODEL MAINTENANCE
+# ============================================================================
+
+# Weekly XGBoost re-training - Sunday 02:30 Chile (05:30 UTC summer)
+# Staggered to run after 7d retraining
+30 5 * * 0 cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_xgboost.py --horizon 15 >> /var/log/retrain.log 2>&1
+
+# Bi-weekly LSTM re-training - 1st and 15th of month, 03:00 Chile (06:00 UTC)
+0 6 1,15 * * cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_lstm.py --horizon 15 >> /var/log/retrain.log 2>&1
+
+# ============================================================================
+# SYSTEM HEALTH
+# ============================================================================
+
+# Hourly health check
+0 * * * * date > /tmp/healthcheck
+
+# Daily performance metrics - 23:15 Chile (02:15 UTC summer)
+15 2 * * * cd /app && PYTHONPATH=/app/src python /app/scripts/calculate_daily_metrics.py --horizon 15 >> /var/log/metrics.log 2>&1
+
+# ============================================================================
+# DATA QUALITY
+# ============================================================================
+
+# Weekly data quality check - Saturdays 10:00 Chile
+0 13 * * 6 cd /app && PYTHONPATH=/app/src python /app/scripts/check_data_quality.py --horizon 15 >> /var/log/quality.log 2>&1
+
+# ============================================================================
+# LOG ROTATION
+# ============================================================================
+
+# Rotate logs weekly - Sunday 03:00 Chile
+0 6 * * 0 cd /app && ./scripts/rotate_logs.sh >> /var/log/maintenance.log 2>&1

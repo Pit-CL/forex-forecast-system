@@ -1,0 +1,87 @@
+# USD/CLP 90-Day Forecast - Optimized Schedule
+# Quarterly strategic planning horizon
+# All times in UTC (adjust for Chile time: UTC-3 summer, UTC-4 winter)
+
+# ============================================================================
+# FORECAST GENERATION - WEEKLY BASIS
+# ============================================================================
+
+# Generate 90-day forecast - Sundays at 22:00 Chile (01:00 UTC Monday summer)
+# Weekly generation for quarterly horizon (no need for daily updates)
+0 1 * * 1 cd /app && PYTHONPATH=/app/src python /app/scripts/forecast_with_ensemble.py --horizon 90 >> /var/log/cron.log 2>&1
+
+# ============================================================================
+# EMAIL DELIVERY - MONTHLY STRATEGIC BRIEFING
+# ============================================================================
+
+# First Tuesday of Month - 07:30 Chile (10:30 UTC summer)
+# Aligns with monthly risk committees and strategic planning sessions
+30 10 1-7 * 2 cd /app && PYTHONPATH=/app/src python /app/scripts/send_unified_email.py --horizon 90d --attach-pdf --quarterly-report >> /var/log/email.log 2>&1
+
+# Quarterly Deep Dive - First Tuesday of Jan/Apr/Jul/Oct
+# Enhanced quarterly analysis with comprehensive PDF report
+30 10 1-7 1,4,7,10 2 cd /app && PYTHONPATH=/app/src python /app/scripts/generate_quarterly_analysis.py --horizon 90 >> /var/log/quarterly.log 2>&1
+
+# ============================================================================
+# MODEL MAINTENANCE - MONTHLY CYCLE
+# ============================================================================
+
+# Monthly XGBoost re-training - 1st Sunday, 03:30 Chile (06:30 UTC summer)
+30 6 1-7 * 0 cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_xgboost.py --horizon 90 >> /var/log/retrain.log 2>&1
+
+# Monthly SARIMAX re-training - 1st of month, 02:00 Chile (05:00 UTC)
+# Essential for capturing long-term seasonal patterns
+0 5 1 * * cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_sarimax.py --horizon 90 >> /var/log/retrain.log 2>&1
+
+# Quarterly LSTM deep re-training - 2nd Sunday of quarter months
+0 7 8-14 1,4,7,10 0 cd /app && PYTHONPATH=/app/src python /app/scripts/deep_retrain_lstm.py --horizon 90 --epochs 100 >> /var/log/retrain.log 2>&1
+
+# ============================================================================
+# STRATEGIC ANALYSIS
+# ============================================================================
+
+# Monthly strategic indicators update - 3rd of month, 05:00 Chile
+0 8 3 * * cd /app && PYTHONPATH=/app/src python /app/scripts/update_strategic_indicators.py >> /var/log/strategic.log 2>&1
+
+# Quarterly performance review - First Monday of quarter months
+0 9 1-7 1,4,7,10 1 cd /app && PYTHONPATH=/app/src python /app/scripts/quarterly_performance_review.py --horizon 90 >> /var/log/performance.log 2>&1
+
+# Copper correlation analysis - Bi-weekly on Sundays
+0 10 * * 0 [ $(expr $(date +\%W) \% 2) -eq 0 ] && cd /app && PYTHONPATH=/app/src python /app/scripts/analyze_copper_correlation.py --horizon 90 >> /var/log/copper.log 2>&1
+
+# ============================================================================
+# RISK MONITORING
+# ============================================================================
+
+# Weekly risk metrics calculation - Mondays 04:00 Chile
+0 7 * * 1 cd /app && PYTHONPATH=/app/src python /app/scripts/calculate_var_cvar.py --horizon 90 >> /var/log/risk.log 2>&1
+
+# Monthly stress testing - 15th of month, 04:00 Chile
+0 7 15 * * cd /app && PYTHONPATH=/app/src python /app/scripts/run_stress_tests.py --horizon 90 >> /var/log/stress.log 2>&1
+
+# ============================================================================
+# SYSTEM HEALTH
+# ============================================================================
+
+# Hourly health check
+0 * * * * date > /tmp/healthcheck
+
+# Weekly performance metrics - Sundays 23:45 Chile (02:45 UTC Monday summer)
+45 2 * * 1 cd /app && PYTHONPATH=/app/src python /app/scripts/calculate_weekly_metrics.py --horizon 90 >> /var/log/metrics.log 2>&1
+
+# ============================================================================
+# DATA MANAGEMENT
+# ============================================================================
+
+# Quarterly data validation - First Sunday of quarter months
+0 5 1-7 1,4,7,10 0 cd /app && PYTHONPATH=/app/src python /app/scripts/validate_historical_data.py --horizon 90 >> /var/log/validation.log 2>&1
+
+# Annual data archival - December 31st, 23:00 Chile
+0 2 31 12 * cd /app && ./scripts/archive_annual_data.sh >> /var/log/archive.log 2>&1
+
+# ============================================================================
+# LOG ROTATION
+# ============================================================================
+
+# Rotate logs monthly - 1st of month, 03:00 Chile
+0 6 1 * * cd /app && ./scripts/rotate_logs.sh --monthly >> /var/log/maintenance.log 2>&1
