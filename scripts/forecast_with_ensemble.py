@@ -709,27 +709,49 @@ def send_forecast_email(
     with open(email_data_path, 'w') as f:
         json.dump(email_data, f, indent=2)
 
-    # Run email script
-    cmd = [
+    # Step 1: Generate email HTML and PDF
+    horizon_str = f"{horizon_days}d"
+    generate_cmd = [
         sys.executable,
         str(EMAIL_SCRIPT),
-        "--data", str(email_data_path),
-        f"--horizon={horizon_days}d",
+        f"--horizon={horizon_str}",
     ]
 
-    if test_mode:
-        cmd.append("--test")
-
     try:
-        logger.info(f"Running email script: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        logger.info(f"Generating email HTML and PDF: {' '.join(generate_cmd)}")
+        result = subprocess.run(generate_cmd, capture_output=True, text=True)
 
-        if result.returncode == 0:
-            logger.info("Email sent successfully")
-            return True
-        else:
-            logger.error(f"Email script failed: {result.stderr}")
+        if result.returncode != 0:
+            logger.error(f"Email generation failed: {result.stderr}")
             return False
+
+        logger.info("Email HTML and PDF generated successfully")
+
+        # Step 2: Send email (unless in test mode)
+        if not test_mode:
+            send_email_script = SCRIPTS_DIR / "send_unified_email.py"
+            email_html_path = OUTPUT_DIR / f"email_{horizon_str}.html"
+            pdf_path = OUTPUT_DIR / f"report_{horizon_str}.pdf"
+
+            send_cmd = [
+                sys.executable,
+                str(send_email_script),
+                str(email_html_path),
+                str(pdf_path),
+            ]
+
+            logger.info(f"Sending email: {' '.join(send_cmd)}")
+            result = subprocess.run(send_cmd, capture_output=True, text=True)
+
+            if result.returncode == 0:
+                logger.info("Email sent successfully")
+                return True
+            else:
+                logger.error(f"Email sending failed: {result.stderr}")
+                return False
+        else:
+            logger.info("Test mode - skipping email send")
+            return True
 
     except Exception as e:
         logger.error(f"Failed to run email script: {e}")
