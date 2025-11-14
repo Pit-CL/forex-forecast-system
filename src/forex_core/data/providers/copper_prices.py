@@ -240,11 +240,12 @@ class CopperPricesClient:
         features["copper_sma_50"] = series.rolling(window=50).mean()
 
         # Trend signal: 1 if SMA20 > SMA50 (uptrend), -1 if downtrend, 0 if equal
-        features["copper_trend_signal"] = np.where(
+        trend_array = np.where(
             features["copper_sma_20"] > features["copper_sma_50"],
             1.0,
             np.where(features["copper_sma_20"] < features["copper_sma_50"], -1.0, 0.0)
         )
+        features["copper_trend_signal"] = pd.Series(trend_array, index=series.index, name="copper_trend_signal")
 
         # 4. MOMENTUM - RSI (Relative Strength Index, 14 periods)
         features["copper_rsi_14"] = self._calculate_rsi(series, period=14)
