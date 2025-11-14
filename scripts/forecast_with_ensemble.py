@@ -636,12 +636,8 @@ def save_results(
 
     # Save metrics (JSON) - only if available from training
     if metrics is not None:
-        metrics_dict = {
-            'xgboost': metrics.xgboost_metrics,
-            'sarimax': metrics.sarimax_metrics,
-            'garch': metrics.garch_metrics,
-            'ensemble': metrics.ensemble_metrics,
-        }
+        # Use to_dict() method to get all metrics as a dictionary
+        metrics_dict = metrics.to_dict()
 
         metrics_path = OUTPUT_DIR / f"metrics_{timestamp}_{horizon_days}d.json"
         with open(metrics_path, 'w') as f:
