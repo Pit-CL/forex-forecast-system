@@ -94,14 +94,14 @@ def load_latest_forecast_data(horizon: str, project_root: Path):
 
 def create_forecast_chart(data: dict) -> str:
     """Create forecast chart and return as base64."""
-    horizon_days = data['horizon_days']
+    horizon_days = data["horizon_days"]
 
     fig = Figure(figsize=(10, 6))
     ax = fig.add_subplot(111)
 
     # Generate sample USD/CLP data (historical)
     dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-    base_price = data['current_price']
+    base_price = data["current_price"]
     prices = base_price + np.cumsum(np.random.randn(30) * 2)
 
     # Historical data
@@ -110,21 +110,21 @@ def create_forecast_chart(data: dict) -> str:
     # Forecast
     forecast_dates = pd.date_range(start=dates[-1] + timedelta(days=1), periods=horizon_days, freq='D')
     forecast_start = prices[-1]
-    forecast_end = data['forecast_price']
+    forecast_end = data["forecast_price"]
     forecast_prices = np.linspace(forecast_start, forecast_end, horizon_days)
     forecast_prices += np.random.randn(horizon_days) * 1.5  # Add some noise
 
     ax.plot(forecast_dates, forecast_prices, 's--', color='#ff6348', linewidth=2, markersize=5, label='Pronóstico')
 
     # Confidence bands (80%)
-    ci_width = (data['ci80_high'] - data['ci80_low']) / 2
+    ci_width = (data["ci80_high"] - data["ci80_low"]) / 2
     upper_band = forecast_prices + ci_width
     lower_band = forecast_prices - ci_width
     ax.fill_between(forecast_dates, lower_band, upper_band, alpha=0.2, color='#ff6348', label='IC 80%')
 
     ax.set_xlabel('Fecha', fontsize=10)
     ax.set_ylabel('USD/CLP', fontsize=10)
-    ax.set_title(f"Pronóstico USD/CLP {data['horizon']} - Con Integración de Cobre", fontsize=12, fontweight='bold')
+    ax.set_title(f'Pronóstico USD/CLP {data["horizon"]} - Con Integración de Cobre', fontsize=12, fontweight='bold')
     ax.legend(loc='best', fontsize=9)
     ax.grid(True, alpha=0.3, linestyle='--')
 
@@ -148,8 +148,8 @@ def create_forecast_chart(data: dict) -> str:
 def generate_email_html(data: dict, chart_base64: str) -> str:
     """Generate complete HTML email with all forecast information."""
 
-    bias_class = "bias-alcista" if data['bias'] == "ALCISTA" else "bias-bajista" if data['bias'] == "BAJISTA" else "bias-neutral"
-    bias_color = "#28a745" if data['bias'] == "ALCISTA" else "#dc3545" if data['bias'] == "BAJISTA" else "#6c757d"
+    bias_class = "bias-alcista" if data["bias"] == "ALCISTA" else "bias-bajista" if data["bias"] == "BAJISTA" else "bias-neutral"
+    bias_color = "#28a745" if data["bias"] == "ALCISTA" else "#dc3545" if data["bias"] == "BAJISTA" else "#6c757d"
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -503,37 +503,9 @@ def generate_email_html(data: dict, chart_base64: str) -> str:
 def generate_pdf_html(data: dict) -> str:
     """Generate HTML for complete 5-page PDF report."""
 
-    # Extract variables to avoid f-string quote conflicts
-    generated_at = data['generated_at']
-    horizon = data['horizon']
-    horizon_days = data['horizon_days']
-    current_price = data['current_price']
-    forecast_price = data['forecast_price']
-    change_pct = data['change_pct']
-    bias = data['bias']
-    volatility = data['volatility']
-    ci95_low = data['ci95_low']
-    ci95_high = data['ci95_high']
+    bias_color = "#28a745" if data["bias"] == "ALCISTA" else "#dc3545" if data["bias"] == "BAJISTA" else "#6c757d"
 
-    # System health
-    system_status = data['system_health']['status']
-    system_score = data['system_health']['score']
-    system_performance = data['system_health']['performance']
-    system_predictions = data['system_health']['predictions']
-    copper_status = data['system_health']['copper_status']
-    last_update = data['system_health']['last_update']
-    sources_count = data['system_health']['sources_count']
-
-    # Copper features
-    copper_return_1d = data['copper_features']['return_1d']
-    copper_vol_20d = data['copper_features']['volatility_20d']
-    copper_rsi = data['copper_features']['rsi_14']
-    copper_trend = data['copper_features']['trend']
-    copper_corr = data['copper_features']['correlation_90d']
-
-    bias_color = "#28a745" if bias == "ALCISTA" else "#dc3545" if bias == "BAJISTA" else "#6c757d"
-
-    html = """<!DOCTYPE html>
+    html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -657,15 +629,15 @@ def generate_pdf_html(data: dict) -> str:
     <!-- PÁGINA 1: Portada + Resumen Ejecutivo + Métricas -->
     <div class="header">
         <h1>📊 Informe de Pronóstico USD/CLP</h1>
-        <div class="subtitle">Horizonte: {horizon_days} días | Generado: {generated_at} (Chile)</div>
+        <div class="subtitle">Horizonte: {data['horizon_days']} días | Generado: {data['generated_at']} (Chile)</div>
         <span class="copper-badge">✨ CON INTEGRACIÓN DE COBRE</span>
     </div>
 
     <div class="section">
         <h2>🎯 Resumen Ejecutivo</h2>
         <p>
-            El sistema de pronóstico USD/CLP proyecta un movimiento <strong>{bias}</strong> para los
-            próximos {horizon_days} días, con una expectativa de cambio de <strong>{change_pct:+.1f}%</strong> desde el nivel actual.
+            El sistema de pronóstico USD/CLP proyecta un movimiento <strong>{data['bias']}</strong> para los
+            próximos {data['horizon_days']} días, con una expectativa de cambio de <strong>{data['change_pct']:+.1f}%</strong> desde el nivel actual.
         </p>
         <p>
             <strong>Nuevo:</strong> Esta proyección incorpora <strong>11 features técnicas del precio del cobre</strong>
@@ -678,27 +650,27 @@ def generate_pdf_html(data: dict) -> str:
         <div class="metric-grid">
             <div class="metric-box">
                 <div class="metric-label">Precio Actual</div>
-                <div class="metric-value">${current_price:.2f}</div>
+                <div class="metric-value">${data['current_price']:.2f}</div>
             </div>
             <div class="metric-box">
-                <div class="metric-label">Pronóstico {horizon}</div>
-                <div class="metric-value positive">${forecast_price:.2f}</div>
+                <div class="metric-label">Pronóstico {data['horizon']}</div>
+                <div class="metric-value positive">${data['forecast_price']:.2f}</div>
             </div>
             <div class="metric-box">
                 <div class="metric-label">Cambio Esperado</div>
-                <div class="metric-value positive">{change_pct:+.2f}%</div>
+                <div class="metric-value positive">{data['change_pct']:+.2f}%</div>
             </div>
             <div class="metric-box">
                 <div class="metric-label">Sesgo</div>
-                <div class="metric-value" style="color: {bias_color};">{bias}</div>
+                <div class="metric-value" style="color: {bias_color};">{data['bias']}</div>
             </div>
             <div class="metric-box">
                 <div class="metric-label">Volatilidad</div>
-                <div class="metric-value">{volatility}</div>
+                <div class="metric-value">{data['volatility']}</div>
             </div>
             <div class="metric-box">
                 <div class="metric-label">Confianza 95%</div>
-                <div class="metric-value">${ci95_low:.0f} - ${ci95_high:.0f}</div>
+                <div class="metric-value">${data['ci95_low']:.0f} - ${data['ci95_high']:.0f}</div>
             </div>
         </div>
     </div>
@@ -723,27 +695,27 @@ def generate_pdf_html(data: dict) -> str:
             <tbody>
                 <tr>
                     <td>Retorno Cobre 1d</td>
-                    <td>{copper_return_1d:+.1f}%</td>
+                    <td>{data['copper_features']['return_1d']:+.1f}%</td>
                     <td>Positivo para CLP</td>
                 </tr>
                 <tr>
                     <td>Volatilidad Cobre 20d</td>
-                    <td>{copper_vol_20d:.1f}% (anualizada)</td>
+                    <td>{data['copper_features']['volatility_20d']:.1f}% (anualizada)</td>
                     <td>Moderada</td>
                 </tr>
                 <tr>
                     <td>RSI Cobre 14</td>
-                    <td>{copper_rsi:.1f}</td>
+                    <td>{data['copper_features']['rsi_14']:.1f}</td>
                     <td>Neutral</td>
                 </tr>
                 <tr>
                     <td>Tendencia Cobre</td>
-                    <td>{copper_trend}</td>
+                    <td>{data['copper_features']['trend']}</td>
                     <td>SMA20 > SMA50</td>
                 </tr>
                 <tr>
                     <td>Correlación Cobre-USD/CLP 90d</td>
-                    <td>{copper_corr:.3f}</td>
+                    <td>{data['copper_features']['correlation_90d']:.3f}</td>
                     <td>Correlación negativa esperada</td>
                 </tr>
             </tbody>
@@ -821,22 +793,22 @@ def generate_pdf_html(data: dict) -> str:
         <div class="metric-grid">
             <div class="metric-box">
                 <div class="metric-label">Estado General</div>
-                <div class="metric-value">{system_status}</div>
+                <div class="metric-value">{data['system_health']['status']}</div>
             </div>
             <div class="metric-box">
                 <div class="metric-label">Puntaje</div>
-                <div class="metric-value">{system_score}/100</div>
+                <div class="metric-value">{data['system_health']['score']}/100</div>
             </div>
             <div class="metric-box">
                 <div class="metric-label">Últimas Predicciones</div>
-                <div class="metric-value">{system_predictions}</div>
+                <div class="metric-value">{data['system_health']['predictions']}</div>
             </div>
         </div>
         <p>
-            <strong>Performance {horizon}:</strong> {system_performance}<br>
-            <strong>Copper Data Source:</strong> Yahoo Finance (HG=F) - {copper_status}<br>
-            <strong>Última Actualización Cobre:</strong> {last_update}<br>
-            <strong>Fuentes Totales:</strong> {sources_count} (incluye 1 nueva: Copper Futures)
+            <strong>Performance {data['horizon']}:</strong> {data['system_health']['performance']}<br>
+            <strong>Copper Data Source:</strong> Yahoo Finance (HG=F) - {data['system_health']['copper_status']}<br>
+            <strong>Última Actualización Cobre:</strong> {data['system_health']['last_update']}<br>
+            <strong>Fuentes Totales:</strong> {data['system_health']['sources_count']} (incluye 1 nueva: Copper Futures)
         </p>
     </div>
 
@@ -905,7 +877,7 @@ def generate_pdf_html(data: dict) -> str:
     <div class="footer">
         <p>
             <strong>USD/CLP Forecasting System - MLOps Phase 2 ✨ with Copper Integration</strong><br>
-            Generado automáticamente el {generated_at} (Chile)<br>
+            Generado automáticamente el {data['generated_at']} (Chile)<br>
             <em>Este informe utiliza modelos de inteligencia artificial y no constituye asesoría financiera.</em><br>
             <em>Consulte con su asesor antes de tomar decisiones de inversión.</em><br><br>
             <strong>Versión:</strong> 2.1.0 | <strong>Modelo:</strong> Chronos-T5 | <strong>Copper Integration:</strong> ✅ Activo
@@ -913,31 +885,8 @@ def generate_pdf_html(data: dict) -> str:
     </div>
 </body>
 </html>
-""".format(
-        system_status=system_status,
-        system_score=system_score,
-        system_performance=system_performance,
-        system_predictions=system_predictions,
-        copper_status=copper_status,
-        last_update=last_update,
-        sources_count=sources_count,
-        generated_at=generated_at,
-        horizon=horizon,
-        horizon_days=horizon_days,
-        current_price=current_price,
-        forecast_price=forecast_price,
-        change_pct=change_pct,
-        bias=bias,
-        volatility=volatility,
-        ci95_low=ci95_low,
-        ci95_high=ci95_high,
-        copper_return_1d=copper_return_1d,
-        copper_vol_20d=copper_vol_20d,
-        copper_rsi=copper_rsi,
-        copper_trend=copper_trend,
-        copper_corr=copper_corr,
-        bias_color=bias_color,
-    )
+"""
+
     return html
 
 
