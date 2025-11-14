@@ -216,12 +216,17 @@ class XGBoostForecaster:
         if not self.config.adaptive_window:
             return self.config.default_training_days
 
+        # IMPORTANT: Use raw values (not normalized/scaled) for trend calculation
+        # Try to find 'value' column (raw data), otherwise use target_col
+        # This ensures we calculate trends on actual exchange rate values
+        trend_col = 'value' if 'value' in data.columns else target_col
+
         # Calculate recent volatility (last 30 days)
-        recent_data = data[target_col].tail(30)
+        recent_data = data[trend_col].tail(30)
         recent_volatility = recent_data.pct_change().std()
 
         # Calculate historical volatility (last 365 days)
-        historical_data = data[target_col].tail(365)
+        historical_data = data[trend_col].tail(365)
         historical_volatility = historical_data.pct_change().std()
 
         # Volatility ratio: >1 means recent volatility is higher than normal
@@ -229,9 +234,9 @@ class XGBoostForecaster:
 
         # NEW: Calculate trend strength (momentum)
         # Strong downtrend or uptrend → use shorter window to adapt faster
-        recent_7d = data[target_col].tail(7)
-        recent_14d = data[target_col].tail(14)
-        recent_30d = data[target_col].tail(30)
+        recent_7d = data[trend_col].tail(7)
+        recent_14d = data[trend_col].tail(14)
+        recent_30d = data[trend_col].tail(30)
 
         # Calculate percentage changes
         change_7d = (recent_7d.iloc[-1] - recent_7d.iloc[0]) / recent_7d.iloc[0]

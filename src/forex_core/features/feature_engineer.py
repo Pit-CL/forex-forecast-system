@@ -97,6 +97,12 @@ def engineer_features(df: pd.DataFrame, horizon: int = 7) -> pd.DataFrame:
     # Create copy to avoid modifying original
     features = df.copy()
 
+    # IMPORTANT: Preserve raw USD/CLP values for adaptive window calculation
+    # If 'value' column exists (raw data), keep it as-is for trend detection
+    # The adaptive window needs actual exchange rate values, not normalized/scaled
+    if 'value' in features.columns:
+        logger.info("Preserving raw 'value' column for adaptive window")
+
     # Apply feature engineering steps
     logger.info("Adding lagged features...")
     features = add_lagged_features(features, horizon=horizon)
