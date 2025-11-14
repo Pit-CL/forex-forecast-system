@@ -525,19 +525,10 @@ def detect_market_shocks(
 
     detector = MarketShockDetector()
 
-    # Get current values
-    current_usdclp = features_df['usdclp'].iloc[-1]
-    current_copper = features_df['copper_price'].iloc[-1] if 'copper_price' in features_df else None
-    current_vix = features_df['vix'].iloc[-1] if 'vix' in features_df else None
-
-    # Detect shocks
-    alerts = detector.detect_shocks(
-        current_usdclp=current_usdclp,
-        forecast_usdclp=forecast.ensemble_forecast[-1],
-        copper_price=current_copper,
-        vix=current_vix,
-        horizon_days=horizon_days,
-    )
+    # Detect shocks using the features DataFrame
+    # MarketShockDetector.detect_all() expects a DataFrame with columns:
+    # usdclp, copper_price, dxy, vix, tpm (optional)
+    alerts = detector.detect_all(features_df)
 
     # Determine overall severity
     if alerts:
