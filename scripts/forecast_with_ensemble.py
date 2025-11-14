@@ -714,7 +714,7 @@ def send_forecast_email(
         sys.executable,
         str(EMAIL_SCRIPT),
         "--data", str(email_data_path),
-        f"--horizon={horizon_days}",
+        f"--horizon={horizon_days}d",
     ]
 
     if test_mode:
