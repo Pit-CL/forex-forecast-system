@@ -552,42 +552,64 @@ class EmailContentBuilder:
         """
 
     def _build_recommendations_section(self, primary_forecast: ForecastData) -> str:
-        """Build recommendations section based on forecast bias."""
+        """Build recommendations section based on forecast bias with dynamic levels."""
+        # Calculate dynamic levels based on current prices and confidence intervals
+        current = primary_forecast.current_price
+        forecast = primary_forecast.forecast_price
+        ci80_low = primary_forecast.ci80_low
+        ci80_high = primary_forecast.ci80_high
+
+        # Calculate support/resistance levels
+        support_level = int(ci80_low / 5) * 5  # Round to nearest 5
+        resistance_level = int(ci80_high / 5) * 5
+        mid_level = int(current / 5) * 5
+
         if primary_forecast.bias == "ALCISTA":
             recommendations = {
-                "Importadores": "Cubrir 30-50% exposición en retrocesos",
-                "Exportadores": "Esperar niveles superiores para vender USD",
-                "Traders": "Long USD/CLP en pullbacks, target IC80 superior",
+                "Importadores": f"Cubrir 30-50% exposición en retrocesos hacia ${support_level}-{support_level+5}. Evitar compras masivas arriba de ${resistance_level}.",
+                "Exportadores": f"Esperar niveles superiores (${resistance_level}+) para vender USD. Aprovechar rally del cobre para mejores tipos de cambio.",
+                "Traders": f"Long USD/CLP en pullbacks a ${support_level}-{support_level+5}, target IC80 superior (${resistance_level}). Stop loss bajo ${support_level-5}.",
+                "Tesorería Corporativa": f"Estrategia escalonada: cubrir 20% actual, 30% en ${support_level+5}, 30% en ${mid_level}, 20% en ${mid_level+5}.",
             }
         elif primary_forecast.bias == "BAJISTA":
             recommendations = {
-                "Importadores": "Aguardar descensos, no apresurarse en coberturas",
-                "Exportadores": "Asegurar niveles actuales, cubrir 40-60% exposición",
-                "Traders": "Short USD/CLP en rebotes, target IC80 inferior",
+                "Importadores": f"Aguardar descensos hacia ${support_level}-{support_level-5}, no apresurarse en coberturas. Aprovechar debilidad del USD.",
+                "Exportadores": f"Asegurar niveles actuales (${int(current)}), cubrir 40-60% exposición. Vender en rebotes hacia ${resistance_level}.",
+                "Traders": f"Short USD/CLP en rebotes a ${resistance_level}-{resistance_level-5}, target IC80 inferior (${support_level}). Stop loss sobre ${resistance_level+5}.",
+                "Tesorería Corporativa": f"Cubrir en rebotes: 30% en ${resistance_level-5}, 30% en ${mid_level+5}, 20% en ${mid_level}, 20% spot.",
             }
         else:  # NEUTRAL
             recommendations = {
-                "Importadores": "Coberturas escalonadas 20-30-30-20%",
-                "Exportadores": "Estrategia neutral, vender en extremos de rango",
-                "Traders": "Range-bound trading, vender volatilidad",
+                "Importadores": f"Coberturas escalonadas: 25% en ${support_level}, 25% en ${mid_level-5}, 25% en ${mid_level}, 25% en ${mid_level+5}.",
+                "Exportadores": f"Estrategia neutral, vender en extremos de rango superior (${resistance_level}+). Mantener flexibilidad.",
+                "Traders": f"Range-bound trading entre ${support_level}-{resistance_level}, vender volatilidad. Neutral hasta ruptura clara.",
+                "Tesorería Corporativa": f"Estrategia balanceada: cubrir 20% actual, 30% en ${mid_level-5}, 30% en ${mid_level+5}, 20% en ${resistance_level-5}.",
             }
 
         recommendations_html = "".join([
-            f"<li><strong>[{role}]:</strong> {action}</li>"
+            f"<li><strong>{role}:</strong> {action}</li>"
             for role, action in recommendations.items()
         ])
 
         return f"""
         <div class="section">
             <div class="section-header">
-                <h3>💡 Recomendaciones</h3>
+                <h3>💡 Recomendaciones por Perfil</h3>
             </div>
             <div class="section-content">
-                <ul>
-                    {recommendations_html}
-                </ul>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Perfil</th>
+                            <th>Recomendación</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {"".join([f'<tr><td><strong>{role}</strong></td><td>{action}</td></tr>' for role, action in recommendations.items()])}
+                    </tbody>
+                </table>
                 <p style="color: #6c757d; font-size: 12px; margin-top: 15px;">
-                    <em>Estas recomendaciones son generadas automáticamente y no constituyen asesoría financiera.
+                    <em>Estas recomendaciones son generadas automáticamente basadas en el pronóstico y no constituyen asesoría financiera.
                     Consulte con su asesor antes de tomar decisiones de inversión.</em>
                 </p>
             </div>
