@@ -1,3 +1,6 @@
+PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+PYTHONPATH=/app/src
+
 # USD/CLP 30-Day Forecast - Optimized Schedule (Strategy by @agent-usdclp)
 # Emails sent on Thursday 1st/15th and every Friday at 07:30 Chile time
 

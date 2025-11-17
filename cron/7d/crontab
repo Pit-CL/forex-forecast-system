@@ -1,3 +1,6 @@
+PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+PYTHONPATH=/app/src
+
 # USD/CLP 7-Day Forecast - Optimized Schedule (Strategy by @agent-usdclp)
 # Emails sent at 07:30 Chile time (users arrive 08:00-09:00)
 
@@ -9,6 +12,9 @@
 
 # Weekly XGBoost re-training - Sunday 00:00 Chile (03:00 UTC)
 0 3 * * 0 cd /app && PYTHONPATH=/app/src python /app/scripts/auto_retrain_xgboost.py --horizon 7 >> /var/log/cron.log 2>&1
+
+# Hourly intraday alert monitoring (during market hours)
+0 * * * * cd /app && PYTHONPATH=/app/src python /app/scripts/hourly_alert_monitor.py >> /var/log/alerts_intraday.log 2>&1
 
 # Health check - write timestamp every hour
 0 * * * * date > /tmp/healthcheck

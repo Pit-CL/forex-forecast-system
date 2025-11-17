@@ -420,18 +420,32 @@ def load_latest_forecast_data(horizon: str, project_root: Path):
     market_data = get_real_market_data()
 
     # Try to load from forecast JSON (if exists)
-    forecast_json = project_root / "output" / f"forecast_{horizon}.json"
+    # Find latest forecast JSON with date pattern
+    import glob
+    output_dir = project_root / "output"
+    pattern = str(output_dir / f"forecast_*_{horizon}.json")
+    files = sorted(glob.glob(pattern), key=lambda x: Path(x).stat().st_mtime, reverse=True)
+    forecast_json = Path(files[0]) if files else output_dir / f"forecast_{horizon}.json"
 
     if forecast_json.exists():
         print(f"Loading forecast data from {forecast_json}")
         with open(forecast_json) as f:
             forecast_data = json.load(f)
 
-        # Extract data from forecast JSON
-        current_price = forecast_data.get("current_price", 927.90)
-        forecast_price = forecast_data.get("forecast_price", current_price * 1.01)
-        ci95_low = forecast_data.get("ci95_low", current_price * 0.985)
-        ci95_high = forecast_data.get("ci95_high", current_price * 1.020)
+        # Extract data from ensemble forecast JSON
+        if "forecast" in forecast_data and "point" in forecast_data["forecast"]:
+            points = forecast_data["forecast"]["point"]
+            lowers = forecast_data["forecast"]["lower_bound"]
+            uppers = forecast_data["forecast"]["upper_bound"]
+            forecast_price = points[-1]
+            ci95_low = lowers[-1]
+            ci95_high = uppers[-1]
+            current_price = market_data.get("current_rate", points[0])
+        else:
+            current_price = forecast_data.get("current_price", 927.90)
+            forecast_price = forecast_data.get("forecast_price", current_price * 1.01)
+            ci95_low = forecast_data.get("ci95_low", current_price * 0.985)
+            ci95_high = forecast_data.get("ci95_high", current_price * 1.020)
 
     else:
         # Fallback: Get real-time data from yfinance
