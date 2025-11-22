@@ -1,0 +1,137 @@
+"""
+Pydantic models for API requests and responses
+"""
+from datetime import datetime, date
+from typing import List, Optional, Dict, Any, Union
+from pydantic import BaseModel, Field
+
+
+# Forecast Models
+class ForecastPoint(BaseModel):
+    """Individual forecast point"""
+    date: date
+    value: float
+    lower_bound: Optional[float] = None
+    upper_bound: Optional[float] = None
+
+
+class ForecastResponse(BaseModel):
+    """Forecast response model"""
+    horizon: str
+    horizon_days: int
+    current_price: float
+    forecast_price: float
+    price_change: float
+    price_change_pct: float
+    confidence_level: float = Field(default=0.95)
+    forecast_date: datetime
+    data: List[ForecastPoint]
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class MultiHorizonForecast(BaseModel):
+    """Multiple horizon forecasts"""
+    timestamp: datetime
+    current_price: float
+    forecasts: Dict[str, ForecastResponse]
+
+
+# Historical Data Models
+class HistoricalPoint(BaseModel):
+    """Historical data point"""
+    date: date
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: Optional[float] = None
+    copper: Optional[float] = None
+    oil: Optional[float] = None
+    dxy: Optional[float] = None
+    sp500: Optional[float] = None
+    vix: Optional[float] = None
+
+
+class HistoricalResponse(BaseModel):
+    """Historical data response"""
+    symbol: str = "USD/CLP"
+    period: str
+    data: List[HistoricalPoint]
+    statistics: Optional[Dict[str, Any]] = None
+
+
+# Technical Indicators Models
+class TechnicalIndicator(BaseModel):
+    """Technical indicator value"""
+    name: str
+    value: float
+    signal: str  # "buy", "sell", "neutral"
+    strength: float  # 0-1
+
+
+class IndicatorsResponse(BaseModel):
+    """Technical indicators response"""
+    timestamp: datetime
+    symbol: str = "USD/CLP"
+    current_price: float
+    indicators: List[TechnicalIndicator]
+    overall_signal: str
+    overall_strength: float
+
+
+# Market Drivers Models
+class MarketDriver(BaseModel):
+    """Market driver information"""
+    name: str
+    symbol: str
+    current_value: float
+    change_24h: float
+    change_pct_24h: float
+    correlation: float  # Correlation with USD/CLP
+    impact: str  # "positive", "negative", "neutral"
+
+
+class DriversResponse(BaseModel):
+    """Market drivers response"""
+    timestamp: datetime
+    drivers: List[MarketDriver]
+
+
+# News Models
+class NewsArticle(BaseModel):
+    """News article model"""
+    id: str
+    title: str
+    summary: Optional[str] = None
+    source: str
+    url: Optional[str] = None
+    published_at: datetime
+    relevance_score: float = Field(ge=0, le=1)
+    sentiment: str = Field(default="neutral")  # "positive", "negative", "neutral"
+    tags: List[str] = []
+
+
+class NewsResponse(BaseModel):
+    """News feed response"""
+    timestamp: datetime
+    count: int
+    articles: List[NewsArticle]
+
+
+# Health Check Models
+class HealthStatus(BaseModel):
+    """Health check response"""
+    status: str = "healthy"
+    timestamp: datetime
+    version: str
+    data_sources: Dict[str, bool]
+    uptime_seconds: Optional[float] = None
+
+
+# Error Models
+class ErrorResponse(BaseModel):
+    """Error response model"""
+    error: str
+    message: str
+    detail: Optional[Any] = None
+    timestamp: datetime = Field(default_factory=datetime.now)

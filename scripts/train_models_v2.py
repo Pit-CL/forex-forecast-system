@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""
+Model Training Script - Phase 2 (Simplified for limited data)
+Trains forecast models using primarily Yahoo Finance data (260 days)
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import os
+import warnings
+warnings.filterwarnings('ignore')
+
+# ML imports
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+from sklearn.linear_model import ElasticNet
+from sklearn.ensemble import RandomForestRegressor
+import xgboost as xgb
+import lightgbm as lgb
+import optuna
+import joblib
+
+# Project paths
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RAW_DATA_DIR = os.path.join(BASE_DIR, 'data', 'raw')
+MODELS_DIR = os.path.join(BASE_DIR, 'models', 'trained')
+RESULTS_DIR = os.path.join(BASE_DIR, 'data', 'results')
+
+# Create directories
+for horizon in ['7D', '15D', '30D', '90D']:
+    os.makedirs(os.path.join(MODELS_DIR, horizon), exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+print("=" * 80)
+print("MODEL TRAINING - Phase 2 (Optimized)")
+print("=" * 80)
+
+# ============================================================================
+# STEP 1: Load Data (Use Yahoo Finance as primary source)
+# ============================================================================
+print("\n📊 Loading data...")
+
+yahoo_df = pd.read_csv(os.path.join(RAW_DATA_DIR, 'yahoo_finance_data.csv'), index_col=0, parse_dates=True)
+if yahoo_df.index.tz is not None:
+    yahoo_df.index = yahoo_df.index.tz_localize(None)
+yahoo_df.index = yahoo_df.index.normalize()
+
+print(f"✅ Yahoo Finance: {yahoo_df.shape}")
+print(f"   Date range: {yahoo_df.index.min()} to {yahoo_df.index.max()}")
+
+# Use Yahoo Finance as base, forward fill limited missing values
+df = yahoo_df.ffill(limit=3)
+
+# Merge FRED interest rate data (NEW 2025-11-22)
+FRED_FILE = os.path.join(RAW_DATA_DIR, "fred_interest_rates.csv")
+if os.path.exists(FRED_FILE):
+    fred_df = pd.read_csv(FRED_FILE, parse_dates=["date"], index_col="date")
+    if fred_df.index.tz is not None:
+        fred_df.index = fred_df.index.tz_localize(None)
+    fred_df.index = fred_df.index.normalize()
+    df = df.join(fred_df[["rate_differential"]], how="left")
+    df["rate_differential"] = df["rate_differential"].ffill().bfill()
+    print(f"✅ FRED rates merged: rate_differential [{df['rate_differential'].min():.2f}, {df['rate_differential'].max():.2f}]")
+df = df.dropna()
+
+print(f"\n✅ Working dataset: {df.shape} rows")
+
+# ============================================================================
+# STEP 2: Simplified Feature Engineering
+# ============================================================================
+print("\n🔧 Engineering features...")
+
+def create_features_optimized(data, target_col='USDCLP'):
+    """Create features optimized for limited data"""
+    df_feat = data.copy()
+
+    # 1. LAG FEATURES (limited to recent lags)
+    print("  Creating lag features...")
+    for lag in [1, 2, 3, 5, 7, 10, 14]:
+        df_feat[f'{target_col}_lag_{lag}'] = df_feat[target_col].shift(lag)
+        if 'Copper' in df_feat.columns:
+            df_feat[f'Copper_lag_{lag}'] = df_feat['Copper'].shift(lag)
+        if 'DXY' in df_feat.columns:
+            df_feat[f'DXY_lag_{lag}'] = df_feat['DXY'].shift(lag)
+
+    # 2. ROLLING STATISTICS (limited windows)
+    print("  Creating rolling statistics...")
+    for window in [5, 10, 20, 30]:
+        df_feat[f'{target_col}_ma_{window}'] = df_feat[target_col].rolling(window).mean()
+        df_feat[f'{target_col}_std_{window}'] = df_feat[target_col].rolling(window).std()
+        if 'Copper' in df_feat.columns:
+            df_feat[f'Copper_ma_{window}'] = df_feat['Copper'].rolling(window).mean()
+
+    # 3. RETURNS
+    print("  Creating returns...")
+    for period in [1, 3, 5, 7, 14]:
+        df_feat[f'{target_col}_return_{period}'] = df_feat[target_col].pct_change(period)
+        if 'Copper' in df_feat.columns:
+            df_feat[f'Copper_return_{period}'] = df_feat['Copper'].pct_change(period)
+        if 'DXY' in df_feat.columns:
+            df_feat[f'DXY_return_{period}'] = df_feat['DXY'].pct_change(period)
+
+    # 4. TECHNICAL INDICATORS
+    print("  Creating technical indicators...")
+    # RSI
+    for window in [7, 14]:
+        delta = df_feat[target_col].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+        rs = gain / loss
+        df_feat[f'{target_col}_rsi_{window}'] = 100 - (100 / (1 + rs))
+
+    # 5. CROSS-MARKET FEATURES
+    print("  Creating cross-market features...")
+    if 'Copper' in df_feat.columns:
+        df_feat['USDCLP_Copper_ratio'] = df_feat[target_col] / df_feat['Copper']
+    if 'DXY' in df_feat.columns:
+        df_feat['USDCLP_DXY_ratio'] = df_feat[target_col] / df_feat['DXY']
+    if 'Copper' in df_feat.columns and 'Oil' in df_feat.columns:
+        df_feat['Copper_Oil_ratio'] = df_feat['Copper'] / df_feat['Oil']
+
+    # 6. CALENDAR FEATURES
+    print("  Creating calendar features...")
+    df_feat['day_of_week'] = df_feat.index.dayofweek
+    df_feat['day_of_month'] = df_feat.index.day
+    df_feat['month'] = df_feat.index.month
+    df_feat['is_month_end'] = df_feat.index.is_month_end.astype(int)
+
+    print(f"  ✅ Created {len(df_feat.columns)} features")
+    return df_feat
+
+df_features = create_features_optimized(df)
+
+# Drop rows with NaN (from feature engineering)
+df_features = df_features.dropna()
+
+print(f"\n✅ Feature engineering complete: {df_features.shape}")
+
+# ============================================================================
+# STEP 3: Prepare Data
+# ============================================================================
+print("\n📊 Preparing train/test splits...")
+
+train_size = int(len(df_features) * 0.8)
+train_data = df_features.iloc[:train_size]
+test_data = df_features.iloc[train_size:]
+
+print(f"✅ Training: {train_data.shape} ({train_data.index.min()} to {train_data.index.max()})")
+print(f"✅ Test: {test_data.shape} ({test_data.index.min()} to {test_data.index.max()})")
+
+# ============================================================================
+# STEP 4: Helper Functions
+# ============================================================================
+
+def prepare_horizon_data(df, target_col='USDCLP', horizon_days=7):
+    """Prepare features and target for specific forecast horizon"""
+    # Select features (exclude raw target)
+    feature_cols = [c for c in df.columns if c != target_col or any(x in c for x in ['lag', 'return', 'ma', 'std', 'rsi', 'ratio'])]
+    X = df[feature_cols]
+
+    # Create target
+    y = df[target_col].shift(-horizon_days)
+
+    # Drop rows with NaN targets
+    valid_idx = ~y.isna()
+    X = X[valid_idx]
+    y = y[valid_idx]
+
+    return X, y
+
+def evaluate_model(y_true, y_pred, model_name):
+    """Calculate metrics"""
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mape = mean_absolute_percentage_error(y_true, y_pred) * 100
+
+    # Directional accuracy
+    if len(y_true) > 1:
+        direction_true = np.sign(np.diff(y_true, prepend=y_true.iloc[0] if hasattr(y_true, 'iloc') else y_true[0]))
+        direction_pred = np.sign(np.diff(y_pred, prepend=y_pred[0]))
+        directional_accuracy = np.mean(direction_true == direction_pred) * 100
+    else:
+        directional_accuracy = 0
+
+    metrics = {
+        'model': model_name,
+        'mae': mae,
+        'rmse': rmse,
+        'mape': mape,
+        'directional_accuracy': directional_accuracy
+    }
+
+    print(f"    MAE: {mae:.4f} | RMSE: {rmse:.4f} | MAPE: {mape:.2f}% | Dir.Acc: {directional_accuracy:.2f}%")
+
+    return metrics
+
+# ============================================================================
+# STEP 5: Train Models
+# ============================================================================
+
+results = []
+horizons = [7, 15, 30, 90]
+
+for horizon in horizons:
+    print("\n" + "=" * 80)
+    print(f"TRAINING {horizon}-DAY MODELS")
+    print("=" * 80)
+
+    # Prepare data
+    X_train, y_train = prepare_horizon_data(train_data, horizon_days=horizon)
+    X_test, y_test = prepare_horizon_data(test_data, horizon_days=horizon)
+
+    if len(X_train) == 0 or len(X_test) == 0:
+        print(f"⚠️  Skipping {horizon}D - insufficient data after shifting")
+        continue
+
+    # Select top features (adaptive based on data size)
+    n_features = min(30, len(X_train.columns))
+    correlations = X_train.corrwith(y_train).abs().sort_values(ascending=False)
+    top_features = correlations.head(n_features).index.tolist()
+
+    X_train_top = X_train[top_features]
+    X_test_top = X_test[top_features]
+
+    # Scale
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train_top)
+    X_test_scaled = scaler.transform(X_test_top)
+
+    print(f"\n{horizon}D Training: {X_train_top.shape}, Target: {y_train.shape}")
+    print(f"{horizon}D Test: {X_test_top.shape}, Target: {y_test.shape}")
+
+    # MODEL 1: XGBoost/LightGBM (Primary - use LightGBM for all)
+    print(f"\n🔧 Training LightGBM ({horizon}D - Primary)...")
+
+    def objective_lgb(trial):
+        params = {
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3),
+            'n_estimators': trial.suggest_int('n_estimators', 50, 300),
+            'num_leaves': trial.suggest_int('num_leaves', 20, 100),
+            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+            'random_state': 42,
+            'verbose': -1
+        }
+
+        model = lgb.LGBMRegressor(**params)
+        model.fit(X_train_scaled, y_train)
+        y_pred = model.predict(X_test_scaled)
+        return mean_absolute_percentage_error(y_test, y_pred)
+
+    study_lgb = optuna.create_study(direction='minimize', study_name=f'lgb_{horizon}d')
+    study_lgb.optimize(objective_lgb, n_trials=20, show_progress_bar=False)
+
+    print(f"  ✅ Best MAPE: {study_lgb.best_value * 100:.2f}%")
+
+    # Train final model
+    lgb_model = lgb.LGBMRegressor(**study_lgb.best_params, random_state=42, verbose=-1)
+    lgb_model.fit(X_train_scaled, y_train)
+    y_pred_lgb = lgb_model.predict(X_test_scaled)
+
+    metrics_lgb = evaluate_model(y_test, y_pred_lgb, f'LightGBM_{horizon}D')
+    results.append(metrics_lgb)
+
+    # Save model
+    joblib.dump({
+        'model': lgb_model,
+        'scaler': scaler,
+        'features': top_features,
+        'best_params': study_lgb.best_params
+    }, os.path.join(MODELS_DIR, f'{horizon}D', 'lightgbm_primary.joblib'))
+
+    # MODEL 2: Simple baseline (ElasticNet)
+    print(f"\n🔧 Training ElasticNet ({horizon}D - Backup)...")
+
+    en_model = ElasticNet(alpha=1.0, l1_ratio=0.5, random_state=42)
+    en_model.fit(X_train_scaled, y_train)
+    y_pred_en = en_model.predict(X_test_scaled)
+
+    metrics_en = evaluate_model(y_test, y_pred_en, f'ElasticNet_{horizon}D')
+    results.append(metrics_en)
+
+    # Save model with MAPE
+    joblib.dump({
+        'model': en_model,
+        'scaler': scaler,
+        'features': top_features,
+        'mape': metrics_en['mape'],
+        'metrics': metrics_en
+    }, os.path.join(MODELS_DIR, f'{horizon}D', 'elasticnet_backup.joblib'))
+
+# ============================================================================
+# STEP 6: Save Results
+# ============================================================================
+print("\n" + "=" * 80)
+print("SAVING RESULTS")
+print("=" * 80)
+
+results_df = pd.DataFrame(results)
+results_path = os.path.join(RESULTS_DIR, 'model_performance.csv')
+results_df.to_csv(results_path, index=False)
+print(f"\n✅ Performance metrics saved: {results_path}")
+
+print("\n" + "=" * 80)
+print("TRAINING SUMMARY")
+print("=" * 80)
+print(results_df.to_string(index=False))
+
+# Save metadata
+import json
+metadata = {
+    'training_date': datetime.now().isoformat(),
+    'training_samples': len(train_data),
+    'test_samples': len(test_data),
+    'total_features_created': len(df_features.columns),
+    'models_trained': len(results)
+}
+
+metadata_path = os.path.join(RESULTS_DIR, 'training_metadata.json')
+with open(metadata_path, 'w') as f:
+    json.dump(metadata, f, indent=2)
+
+print(f"\n✅ Training metadata saved: {metadata_path}")
+
+print("\n" + "=" * 80)
+print("✅ PHASE 2 COMPLETE - ALL MODELS TRAINED AND SAVED")
+print("=" * 80)
+print(f"\nModels saved to: {MODELS_DIR}")
+print(f"Results saved to: {RESULTS_DIR}")

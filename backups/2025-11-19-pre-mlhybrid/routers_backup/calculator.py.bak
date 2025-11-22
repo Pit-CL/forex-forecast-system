@@ -1,0 +1,269 @@
+"""
+USD/CLP Calculator Router
+"""
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+from typing import Dict, List, Optional
+from datetime import datetime, timedelta
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/calculator", tags=["Calculator"])
+
+
+class CalculatorRequest(BaseModel):
+    usd_amount: float
+    target_horizon: Optional[str] = "7d"  # 7d, 15d, 30d, 90d
+
+
+class CalculatorResponse(BaseModel):
+    timestamp: datetime
+    usd_amount: float
+    current_rate: float
+    clp_amount_now: float
+    forecasts: Dict[str, Dict]
+    best_horizon: str
+    potential_savings: Dict[str, float]
+    recommendation: str
+
+
+class BulkCalculatorRequest(BaseModel):
+    amounts: List[float]
+    compare_horizons: List[str] = ["7d", "15d", "30d"]
+
+
+@router.post("/convert", response_model=CalculatorResponse)
+async def calculate_conversion(request: CalculatorRequest):
+    """
+    Calculate USD to CLP conversion with forecast analysis
+    Shows potential savings/costs for different purchase timing
+    """
+    try:
+        # Import services
+        from services.forecast_service import ForecastService
+        from services.data_service import DataService
+
+        forecast_service = ForecastService()
+        data_service = DataService()
+
+        # Get current price
+        historical = await data_service.get_historical_data(1)
+        current_rate = historical.data[-1].close if historical.data else 950.0
+
+        # Calculate current conversion
+        clp_amount_now = request.usd_amount * current_rate
+
+        # Get forecasts for all horizons
+        horizons = ["7d", "15d", "30d", "90d"]
+        forecasts = {}
+        potential_savings = {}
+        best_saving = 0
+        best_horizon = "now"
+
+        for horizon in horizons:
+            forecast = await forecast_service.get_forecast(horizon)
+            if forecast:
+                future_rate = forecast.forecast_price
+                future_clp = request.usd_amount * future_rate
+                saving = clp_amount_now - future_clp  # Positive = save money by waiting
+
+                forecasts[horizon] = {
+                    "forecast_rate": future_rate,
+                    "clp_amount": round(future_clp, 2),
+                    "difference": round(future_clp - clp_amount_now, 2),
+                    "difference_pct": round(((future_rate - current_rate) / current_rate) * 100, 2),
+                    "confidence": forecast.confidence_level
+                }
+
+                potential_savings[horizon] = round(saving, 2)
+
+                # Track best option (highest saving)
+                if saving > best_saving:
+                    best_saving = saving
+                    best_horizon = horizon
+
+        # Generate recommendation
+        if best_horizon == "now":
+            recommendation = "Comprar ahora - Se espera que el tipo de cambio suba"
+        elif best_saving > clp_amount_now * 0.02:  # More than 2% savings
+            recommendation = f"Esperar {best_horizon} - Potencial ahorro de ${best_saving:,.0f} CLP"
+        elif best_saving > clp_amount_now * 0.01:  # 1-2% savings
+            recommendation = f"Considerar esperar {best_horizon} - Ahorro moderado posible"
+        else:
+            recommendation = "Comprar ahora o en los próximos días - Cambios mínimos esperados"
+
+        return CalculatorResponse(
+            timestamp=datetime.now(),
+            usd_amount=request.usd_amount,
+            current_rate=current_rate,
+            clp_amount_now=round(clp_amount_now, 2),
+            forecasts=forecasts,
+            best_horizon=best_horizon,
+            potential_savings=potential_savings,
+            recommendation=recommendation
+        )
+
+    except Exception as e:
+        logger.error(f"Calculator error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bulk-convert")
+async def bulk_conversion(request: BulkCalculatorRequest):
+    """
+    Calculate conversions for multiple USD amounts
+    Useful for comparing different purchase sizes
+    """
+    try:
+        results = []
+        for amount in request.amounts:
+            calc_request = CalculatorRequest(
+                usd_amount=amount,
+                target_horizon=request.compare_horizons[0] if request.compare_horizons else "7d"
+            )
+            result = await calculate_conversion(calc_request)
+            results.append({
+                "amount": amount,
+                "clp_now": result.clp_amount_now,
+                "best_horizon": result.best_horizon,
+                "max_saving": max(result.potential_savings.values()) if result.potential_savings else 0,
+                "recommendation": result.recommendation
+            })
+
+        return {
+            "timestamp": datetime.now(),
+            "current_rate": results[0]["clp_now"] / results[0]["amount"] if results else 950.0,
+            "calculations": results,
+            "summary": {
+                "total_usd": sum(r["amount"] for r in results),
+                "total_clp_now": sum(r["clp_now"] for r in results),
+                "total_potential_savings": sum(r["max_saving"] for r in results)
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Bulk calculator error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/optimal-timing")
+async def get_optimal_timing(
+    usd_amount: float = Query(..., description="USD amount to convert"),
+    risk_tolerance: str = Query("medium", description="Risk tolerance: low, medium, high")
+):
+    """
+    Get optimal timing recommendation based on risk tolerance
+    """
+    try:
+        from services.forecast_service import ForecastService
+
+        forecast_service = ForecastService()
+
+        # Risk tolerance affects horizon preference
+        risk_horizons = {
+            "low": ["7d"],  # Short term only
+            "medium": ["7d", "15d", "30d"],  # Up to 30 days
+            "high": ["7d", "15d", "30d", "90d"]  # All horizons
+        }
+
+        horizons = risk_horizons.get(risk_tolerance, ["7d", "15d"])
+        recommendations = []
+
+        for horizon in horizons:
+            forecast = await forecast_service.get_forecast(horizon)
+            if forecast:
+                # Calculate risk-adjusted score
+                expected_change = forecast.price_change_pct
+                confidence = forecast.confidence_level
+                risk_adjusted_score = expected_change * confidence
+
+                # Adjust for risk tolerance
+                if risk_tolerance == "low":
+                    risk_adjusted_score *= 0.5  # Penalize longer horizons
+                elif risk_tolerance == "high":
+                    risk_adjusted_score *= 1.2  # Reward potential gains
+
+                recommendations.append({
+                    "horizon": horizon,
+                    "expected_rate": forecast.forecast_price,
+                    "expected_change_pct": expected_change,
+                    "confidence": confidence,
+                    "risk_adjusted_score": round(risk_adjusted_score, 2),
+                    "clp_amount": round(usd_amount * forecast.forecast_price, 2)
+                })
+
+        # Sort by risk-adjusted score
+        recommendations.sort(key=lambda x: x["risk_adjusted_score"], reverse=True)
+
+        best = recommendations[0] if recommendations else None
+
+        return {
+            "timestamp": datetime.now(),
+            "usd_amount": usd_amount,
+            "risk_tolerance": risk_tolerance,
+            "recommendations": recommendations,
+            "optimal": best,
+            "advice": f"Para tu tolerancia al riesgo '{risk_tolerance}', recomendamos " + ("comprar ahora" if not best or best["expected_change_pct"] > 0 else f"esperar {best[""horizon""]}",
+        }
+
+    except Exception as e:
+        logger.error(f"Optimal timing error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/historical-performance")
+async def get_historical_calculator_performance(days: int = 30):
+    """
+    Show how calculator recommendations would have performed historically
+    """
+    try:
+        from services.data_service import DataService
+
+        data_service = DataService()
+        historical = await data_service.get_historical_data(days)
+
+        if not historical.data:
+            raise HTTPException(status_code=404, detail="No historical data available")
+
+        # Simulate past recommendations
+        performances = []
+        for i in range(len(historical.data) - 7):  # Need at least 7 days forward
+            date = historical.data[i].date
+            rate_then = historical.data[i].close
+            rate_7d_later = historical.data[i + 7].close if i + 7 < len(historical.data) else rate_then
+
+            # Would we have recommended buy or wait?
+            change_7d = ((rate_7d_later - rate_then) / rate_then) * 100
+            recommendation = "wait" if change_7d < -1 else "buy"
+            actual_result = "correct" if (recommendation == "wait" and change_7d < 0) or \
+                                        (recommendation == "buy" and change_7d >= 0) else "incorrect"
+
+            performances.append({
+                "date": date,
+                "rate": rate_then,
+                "rate_7d_later": rate_7d_later,
+                "change_pct": round(change_7d, 2),
+                "recommendation": recommendation,
+                "result": actual_result
+            })
+
+        # Calculate accuracy
+        correct = sum(1 for p in performances if p["result"] == "correct")
+        accuracy = (correct / len(performances)) * 100 if performances else 0
+
+        return {
+            "period": f"Last {days} days",
+            "total_recommendations": len(performances),
+            "accuracy": round(accuracy, 1),
+            "performance_history": performances[-10:],  # Last 10 for brevity
+            "summary": {
+                "correct_calls": correct,
+                "incorrect_calls": len(performances) - correct,
+                "best_call": max(performances, key=lambda x: abs(x["change_pct"])) if performances else None
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Historical performance error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

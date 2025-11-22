@@ -1,0 +1,18 @@
+#!/bin/bash
+echo "=== Forex Forecast System Status ==="
+echo ""
+echo "🔷 Container Status:"
+docker ps --format "table {{.Names}}\t{{.Status}}" | grep forex
+echo ""
+echo "🔷 API Health:"
+curl -s http://localhost/api/health | python3 -m json.tool | grep -E '"status"|"version"'
+echo ""
+echo "🔷 Latest Forecast:"
+curl -s http://localhost/api/forecasts | python3 -m json.tool | head -10
+echo ""
+echo "🔷 Access URLs:"
+echo "  Frontend: http://155.138.162.47/"
+echo "  API: http://155.138.162.47/api/"
+echo ""
+echo "🔷 Firewall Status:"
+ufw status | grep -E '80/tcp|443/tcp'

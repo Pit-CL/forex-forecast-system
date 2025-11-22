@@ -1,0 +1,123 @@
+'use client'
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { MarketData } from '@/lib/api'
+import { TrendingUp, TrendingDown, Activity } from 'lucide-react'
+import { formatPercentage } from '@/lib/utils'
+
+interface MarketIndicatorsProps {
+  marketData: MarketData | undefined
+}
+
+interface Indicator {
+  name: string
+  value: number | null
+  change: number
+  icon: string
+  description: string
+}
+
+export function MarketIndicators({ marketData }: MarketIndicatorsProps) {
+  if (!marketData) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Indicadores de Mercado</CardTitle>
+          <CardDescription>Datos de mercado en tiempo real</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-center py-8">
+            <Activity className="h-6 w-6 animate-pulse text-muted-foreground" />
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const indicators: Indicator[] = [
+    {
+      name: 'Copper',
+      value: marketData.copper,
+      change: marketData.copper_change,
+      icon: '🔶',
+      description: 'Precio del cobre (HG=F)',
+    },
+    {
+      name: 'Oil',
+      value: marketData.oil,
+      change: marketData.oil_change,
+      icon: '🛢️',
+      description: 'Precio del petróleo (CL=F)',
+    },
+    {
+      name: 'DXY',
+      value: marketData.dxy,
+      change: marketData.dxy_change,
+      icon: '💵',
+      description: 'Índice del dólar',
+    },
+    {
+      name: 'S&P 500',
+      value: marketData.sp500,
+      change: marketData.sp500_change,
+      icon: '📈',
+      description: 'Índice S&P 500',
+    },
+    {
+      name: 'VIX',
+      value: marketData.vix,
+      change: marketData.vix_change,
+      icon: '⚡',
+      description: 'Índice de volatilidad',
+    },
+    {
+      name: 'Rate Diff',
+      value: marketData.rate_differential,
+      change: 0,
+      icon: '📊',
+      description: 'Diferencial tasas (CL-US)',
+    },
+  ]
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Indicadores de Mercado</CardTitle>
+        <CardDescription>Datos de mercado en tiempo real</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {indicators.map((indicator) => {
+            const isPositive = indicator.change > 0
+
+            return (
+              <div
+                key={indicator.name}
+                className="flex items-center gap-3 rounded-lg border p-4 hover:bg-accent/50 transition-colors"
+              >
+                <div className="text-3xl">{indicator.icon}</div>
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold">{indicator.name}</span>
+                    <div className={`flex items-center gap-1 text-xs ${isPositive ? 'text-success' : 'text-danger'}`}>
+                      {isPositive ? (
+                        <TrendingUp className="h-3 w-3" />
+                      ) : (
+                        <TrendingDown className="h-3 w-3" />
+                      )}
+                      <span className="font-semibold">{formatPercentage(indicator.change)}</span>
+                    </div>
+                  </div>
+                  <p className="text-lg font-mono font-bold">
+                    {indicator.value !== null ? indicator.value.toFixed(2) : 'N/A'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{indicator.description}</p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}

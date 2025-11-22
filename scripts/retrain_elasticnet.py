@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+# Quick retrain ElasticNet with MAPE
+import pandas as pd
+import numpy as np
+import joblib
+import os
+from sklearn.linear_model import ElasticNet
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+
+DATA_FILE = "data/raw/yahoo_finance_data.csv"
+FRED_FILE = "data/raw/fred_interest_rates.csv"
+MODELS_DIR = "models/trained"
+
+def create_features_enhanced(data, target_col="USDCLP"):
+    df_feat = data.copy()
+    
+    # LAG FEATURES
+    for lag in [1, 2, 3, 5, 7, 10, 14]:
+        df_feat[f"{target_col}_lag_{lag}"] = df_feat[target_col].shift(lag)
+        if "Copper" in df_feat.columns:
+            df_feat[f"Copper_lag_{lag}"] = df_feat["Copper"].shift(lag)
+        if "DXY" in df_feat.columns:
+            df_feat[f"DXY_lag_{lag}"] = df_feat["DXY"].shift(lag)
+    
+    # ROLLING STATISTICS
+    for window in [5, 10, 20, 30]:
+        df_feat[f"{target_col}_ma_{window}"] = df_feat[target_col].rolling(window).mean()
+        df_feat[f"{target_col}_std_{window}"] = df_feat[target_col].rolling(window).std()
+        if "Copper" in df_feat.columns:
+            df_feat[f"Copper_ma_{window}"] = df_feat["Copper"].rolling(window).mean()
+    
+    # CROSS-MARKET FEATURES
+    if "Copper" in df_feat.columns:
+        df_feat["USDCLP_Copper_ratio"] = df_feat[target_col] / df_feat["Copper"]
+    if "DXY" in df_feat.columns:
+        df_feat["USDCLP_DXY_ratio"] = df_feat[target_col] / df_feat["DXY"]
+    if "Copper" in df_feat.columns and "Oil" in df_feat.columns:
+        df_feat["Copper_Oil_ratio"] = df_feat["Copper"] / df_feat["Oil"]
+    
+    # RETURN FEATURES
+    if "DXY" in df_feat.columns:
+        df_feat["DXY_return_14"] = df_feat["DXY"].pct_change(periods=14, fill_method=None)
+    
+    # MOMENTUM INDICATORS
+    df_feat[f"{target_col}_roc_5"] = df_feat[target_col].pct_change(periods=5, fill_method=None)
+    df_feat[f"{target_col}_roc_10"] = df_feat[target_col].pct_change(periods=10, fill_method=None)
+    
+    return df_feat
+
+def prepare_data_for_horizon(df, horizon_days):
+    df_with_features = create_features_enhanced(df)
+    df_with_features["target"] = df_with_features["USDCLP"].shift(-horizon_days)
+    df_clean = df_with_features.dropna()
+    
+    exclude_cols = ["USDCLP", "target", "Copper", "Oil", "DXY", "SP500", "VIX", "Date"]
+    feature_cols = [col for col in df_clean.columns if col not in exclude_cols]
+    
+    X = df_clean[feature_cols]
+    y = df_clean["target"]
+    
+    return X, y, feature_cols
+
+print("=" * 60)
+print("RETRAINING ELASTICNET MODELS WITH MAPE")
+print("=" * 60)
+
+# Load data
+df = pd.read_csv(DATA_FILE, parse_dates=["Date"])
+df = df.sort_values("Date")
+# Merge FRED interest rate data (NEW 2025-11-22)
+if os.path.exists(FRED_FILE):
+    fred_df = pd.read_csv(FRED_FILE, parse_dates=["date"])
+    fred_df = fred_df.rename(columns={"date": "Date"})
+    df = df.merge(fred_df[["Date", "rate_differential"]], on="Date", how="left")
+    df["rate_differential"] = df["rate_differential"].ffill().bfill()
+    print(f"Merged FRED data: rate_differential range [{df['rate_differential'].min():.2f}, {df['rate_differential'].max():.2f}]")
+print(f"Loaded {len(df)} records")
+
+# Train for each horizon
+horizons = [7, 15, 30, 90]
+
+for horizon in horizons:
+    print(f"\nTraining ElasticNet for {horizon}D...")
+    
+    # Prepare data
+    X, y, feature_cols = prepare_data_for_horizon(df, horizon)
+    
+    # Split
+    split_idx = int(len(X) * 0.8)
+    X_train, X_test = X[:split_idx], X[split_idx:]
+    y_train, y_test = y[:split_idx], y[split_idx:]
+    
+    # Scale
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # Train
+    model = ElasticNet(alpha=1.0, l1_ratio=0.5, random_state=42)
+    model.fit(X_train_scaled, y_train)
+    
+    # Evaluate
+    y_pred = model.predict(X_test_scaled)
+    mape = mean_absolute_percentage_error(y_test, y_pred) * 100
+    mae = mean_absolute_error(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    
+    print(f"  MAPE: {mape:.2f}%")
+    print(f"  MAE: ${mae:.2f}")
+    print(f"  RMSE: ${rmse:.2f}")
+    
+    # Save with MAPE
+    model_dir = os.path.join(MODELS_DIR, f"{horizon}D")
+    os.makedirs(model_dir, exist_ok=True)
+    
+    model_dict = {
+        "model": model,
+        "scaler": scaler,
+        "features": feature_cols,
+        "mape": mape,
+        "metrics": {
+            "mape": mape,
+            "mae": mae,
+            "rmse": rmse
+        }
+    }
+    
+    model_path = os.path.join(model_dir, "elasticnet_backup.joblib")
+    joblib.dump(model_dict, model_path)
+    print(f"  Saved to {model_path}")
+
+print("\n" + "=" * 60)
+print("RETRAINING COMPLETE")
+print("=" * 60)

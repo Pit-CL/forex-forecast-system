@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: forex-api
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - API_ENV=production
+      - API_KEY=${API_KEY:-your-secure-api-key}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data:ro
+      - ./models:/app/models:ro
+      - ./logs:/app/logs
+    networks:
+      - forex-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: forex-frontend
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://api:8000
+      - NODE_ENV=development
+    depends_on:
+      - api
+    networks:
+      - forex-network
+    restart: unless-stopped
+
+networks:
+  forex-network:
+    driver: bridge

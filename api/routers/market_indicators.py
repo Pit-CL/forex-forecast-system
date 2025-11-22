@@ -1,0 +1,134 @@
+from fastapi import APIRouter, HTTPException
+from datetime import datetime, timedelta
+from typing import Optional
+import yfinance as yf
+import pandas as pd
+from pathlib import Path
+
+router = APIRouter(prefix="/api/market-indicators", tags=["market-indicators"])
+
+# Cache simple en memoria
+_cache = {
+    "data": None,
+    "timestamp": None
+}
+CACHE_DURATION = 300  # 5 minutos en segundos
+
+def get_live_indicators():
+    """Fetch live market indicators from Yahoo Finance"""
+    
+    # Check cache
+    if _cache["data"] and _cache["timestamp"]:
+        elapsed = (datetime.now() - _cache["timestamp"]).total_seconds()
+        if elapsed < CACHE_DURATION:
+            return _cache["data"]
+    
+    # Tickers mapping
+    tickers = {
+        "copper": "HG=F",      # Copper Futures
+        "oil": "CL=F",         # Crude Oil Futures
+        "dxy": "DX-Y.NYB",     # US Dollar Index
+        "sp500": "^GSPC",      # S&P 500
+        "usdclp": "CLP=X",       # USD/CLP Exchange Rate
+        "vix": "^VIX"          # Volatility Index
+    }
+    
+    indicators = {}
+    
+    for name, ticker_symbol in tickers.items():
+        try:
+            ticker = yf.Ticker(ticker_symbol)
+            info = ticker.info
+            hist = ticker.history(period="2d")
+            
+            # Get current price
+            current_price = info.get("regularMarketPrice") or info.get("currentPrice")
+            
+            # If not available, try from history
+            if not current_price and len(hist) > 0:
+                current_price = hist["Close"].iloc[-1]
+            
+            # Get previous close for change calculation
+            previous_close = info.get("regularMarketPreviousClose")
+            if not previous_close and len(hist) > 1:
+                previous_close = hist["Close"].iloc[-2]
+            
+            # Calculate change
+            if current_price and previous_close:
+                change = current_price - previous_close
+                change_percent = (change / previous_close) * 100
+            else:
+                change = 0
+                change_percent = 0
+            
+            indicators[name] = {
+                "value": round(float(current_price) if current_price else 0, 2),
+                "change": round(float(change), 2),
+                "change_percent": round(float(change_percent), 2),
+                "previous_close": round(float(previous_close) if previous_close else 0, 2),
+                "ticker": ticker_symbol
+            }
+            
+        except Exception as e:
+            print(f"Error fetching {name} ({ticker_symbol}): {e}")
+            indicators[name] = {
+                "value": 0,
+                "change": 0,
+                "change_percent": 0,
+                "previous_close": 0,
+                "ticker": ticker_symbol,
+                "error": str(e)
+            }
+    
+    # Add rate differential from FRED data (NEW 2025-11-22)
+    try:
+        fred_path = Path("/app/data/raw/fred_interest_rates.csv")
+        if fred_path.exists():
+            fred_df = pd.read_csv(fred_path)
+            if "rate_differential" in fred_df.columns and len(fred_df) > 0:
+                rate_diff = float(fred_df["rate_differential"].dropna().iloc[-1])
+                indicators["rate_differential"] = {
+                    "value": round(rate_diff, 2),
+                    "change": 0,
+                    "change_percent": 0,
+                    "description": "Chile Rate - Fed Rate"
+                }
+    except Exception as e:
+        print(f"Error loading rate differential: {e}")
+
+    result = {
+        "timestamp": datetime.now().isoformat(),
+        "indicators": indicators,
+        "cache_duration": CACHE_DURATION,
+        "data_source": "Yahoo Finance (yfinance)"
+    }
+    
+    # Update cache
+    _cache["data"] = result
+    _cache["timestamp"] = datetime.now()
+    
+    return result
+
+@router.get("/live")
+async def get_live_market_indicators():
+    """
+    Get live market indicators (updated every 5 minutes)
+    
+    Returns real-time data for:
+    - Copper (HG=F)
+    - Oil (CL=F)
+    - DXY (DX-Y.NYB)
+    - S&P 500 (^GSPC)
+    - VIX (^VIX)
+    """
+    try:
+        return get_live_indicators()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching market indicators: {str(e)}")
+
+@router.get("/clear-cache")
+async def clear_cache():
+    """Clear the indicators cache (force refresh on next request)"""
+    _cache["data"] = None
+    _cache["timestamp"] = None
+    return {"message": "Cache cleared", "timestamp": datetime.now().isoformat()}

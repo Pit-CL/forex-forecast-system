@@ -1,0 +1,75 @@
+{
+  "generated_at": "2025-11-22T15:15:55.017213",
+  "model_type": "ElasticNet",
+  "horizon_days": 7,
+  "current_price": 930.15,
+  "current_date": "2025-11-21",
+  "target": {
+    "price": 913.95,
+    "date": "2025-11-28",
+    "probability": 0.95,
+    "change_percent": -1.74,
+    "bounded": false
+  },
+  "forecast": {
+    "dates": [
+      "2025-11-22",
+      "2025-11-23",
+      "2025-11-24",
+      "2025-11-25",
+      "2025-11-26",
+      "2025-11-27",
+      "2025-11-28"
+    ],
+    "values": [
+      927.84,
+      925.52,
+      923.21,
+      920.89,
+      918.58,
+      916.26,
+      913.95
+    ],
+    "confidence_lower": [
+      921.55,
+      912.94,
+      904.34,
+      895.74,
+      887.13,
+      878.53,
+      869.92
+    ],
+    "confidence_upper": [
+      934.12,
+      938.1,
+      942.07,
+      946.05,
+      950.02,
+      953.99,
+      957.97
+    ]
+  },
+  "metadata": {
+    "mape": 2.4575060301348373,
+    "features_used": 40,
+    "training_samples": "unknown",
+    "confidence_level": 0.95
+  },
+  "model_selection": {
+    "models_compared": 2,
+    "winner": "ElasticNet",
+    "winner_mape": 2.4575060301348373,
+    "models": [
+      {
+        "name": "ElasticNet",
+        "mape": 2.4575060301348373,
+        "selected": true
+      },
+      {
+        "name": "LightGBM",
+        "mape": 3.772767909766999,
+        "selected": false
+      }
+    ]
+  }
+}

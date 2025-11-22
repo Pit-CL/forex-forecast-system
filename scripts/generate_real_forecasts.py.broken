@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""
+Generate REAL forecasts using trained ElasticNet models
+
+This script REPLACES mock forecast generation with actual model predictions.
+
+Usage:
+    python scripts/generate_real_forecasts.py --horizon 90d
+    python scripts/generate_real_forecasts.py --all
+
+Author: Mega-Datos-Analytics
+Date: 2025-11-19
+"""
+
+import argparse
+import json
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+
+
+def load_latest_data(data_path: Path) -> pd.DataFrame:
+    """Load and clean latest historical data"""
+    csv_path = data_path / "raw" / "yahoo_finance_data.csv"
+
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Data file not found: {csv_path}")
+
+    # Load data
+    df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+    df = df.sort_index()
+
+    # CRITICAL: Clean data (remove outliers)
+    print(f"Original data: {len(df)} rows")
+    df = df[(df['USDCLP'] >= 450) & (df['USDCLP'] <= 1100)]
+    print(f"After cleaning: {len(df)} rows (removed outliers <450 or >1100)")
+
+    return df
+
+
+def compute_features(df: pd.DataFrame, feature_names: list) -> pd.DataFrame:
+    """
+    Compute features needed by the model
+
+    Features include:
+    - USDCLP lags (1, 2, 3, 5, 7, 10, 14)
+    - USDCLP moving averages (5, 10, 20, 30)
+    - USDCLP standard deviations (5, 10, 20, 30)
+    - Ratios (USDCLP/DXY, USDCLP/Copper, Copper/Oil)
+    - DXY lags (1, 2, 3, 5, 7, 10, 14)
+    - DXY returns (14-day)
+    - External features (SP500, Oil, VIX)
+    """
+    features_df = pd.DataFrame(index=df.index)
+
+    # USDCLP features
+    for lag in [1, 2, 3, 5, 7, 10, 14]:
+        features_df[f'USDCLP_lag_{lag}'] = df['USDCLP'].shift(lag)
+
+    for window in [5, 10, 20, 30]:
+        features_df[f'USDCLP_ma_{window}'] = df['USDCLP'].rolling(window).mean()
+        features_df[f'USDCLP_std_{window}'] = df['USDCLP'].rolling(window).std()
+
+    # Ratios
+    features_df['USDCLP_DXY_ratio'] = df['USDCLP'] / df['DXY']
+    features_df['USDCLP_Copper_ratio'] = df['USDCLP'] / df['Copper']
+    features_df['Copper_Oil_ratio'] = df['Copper'] / df['Oil']
+
+    # Copper features
+    for lag in [1, 2, 3, 5, 7, 10, 14]:
+        features_df[f'Copper_lag_{lag}'] = df['Copper'].shift(lag)
+
+    for window in [5, 10, 20, 30]:
+        features_df[f'Copper_ma_{window}'] = df['Copper'].rolling(window).mean()
+        features_df[f'Copper_std_{window}'] = df['Copper'].rolling(window).std()
+
+    # DXY features
+    for lag in [1, 2, 3, 5, 7, 10, 14]:
+        features_df[f'DXY_lag_{lag}'] = df['DXY'].shift(lag)
+
+    features_df['DXY_return_14'] = df['DXY'].pct_change(14, fill_method=None)
+
+    # USDCLP rate of change
+    features_df['USDCLP_roc_5'] = df['USDCLP'].pct_change(5, fill_method=None)
+    features_df['USDCLP_roc_10'] = df['USDCLP'].pct_change(10, fill_method=None)
+
+    # External features
+    features_df['SP500'] = df['SP500']
+    features_df['Oil'] = df['Oil']
+    features_df['VIX'] = df['VIX']
+    features_df['DXY'] = df['DXY']
+    features_df['Copper'] = df['Copper']
+
+    # Select only features used by model (in correct order)
+    features_df = features_df[feature_names]
+
+    return features_df
+
+
+def generate_forecast(
+    model_dict: dict,
+    df: pd.DataFrame,
+    horizon_days: int,
+    confidence_level: float = 0.95
+) -> dict:
+    """
+    Generate forecast using trained model
+
+    Args:
+        model_dict: Dictionary with 'model', 'scaler', 'features', 'mape'
+        df: Historical data
+        horizon_days: Forecast horizon
+        confidence_level: Confidence level for intervals (default 0.95)
+
+    Returns:
+        Dictionary with forecast data ready to save as JSON
+    """
+    model = model_dict['model']
+    scaler = model_dict['scaler']
+    feature_names = model_dict['features']
+    mape = model_dict.get('mape', 5.0)
+
+    # Compute features for latest data point
+    features_df = compute_features(df, feature_names)
+
+    # Get latest complete row (no NaN)
+    latest_features = features_df.dropna().iloc[-1:].values
+
+    if latest_features.shape[0] == 0:
+        raise ValueError("No complete feature row available (all have NaN)")
+
+    # Scale features
+    latest_features_scaled = scaler.transform(latest_features)
+
+    # Predict
+    prediction = model.predict(latest_features_scaled)[0]
+
+    # Get current price (latest USDCLP)
+    current_price = float(df['USDCLP'].dropna().iloc[-1])
+    current_date = df.index[-1]
+
+    # Generate confidence intervals based on MAPE
+    # Rule: confidence_width = MAPE * z_score
+    # For 95% confidence, z ≈ 1.96
+    z_scores = {0.80: 1.28, 0.90: 1.645, 0.95: 1.96, 0.99: 2.576}
+    z_score = z_scores.get(confidence_level, 1.96)
+
+    prediction_std = (mape / 100) * prediction * z_score
+
+    # Generate daily forecast (simple linear interpolation)
+    forecast_dates = []
+    forecast_values = []
+    forecast_lower = []
+    forecast_upper = []
+
+    for i in range(1, horizon_days + 1):
+        forecast_date = current_date + timedelta(days=i)
+
+        # Linear interpolation from current to predicted
+        progress = i / horizon_days
+        forecast_value = current_price + (prediction - current_price) * progress
+
+        # Confidence interval grows with horizon
+        interval_width = prediction_std * (i / horizon_days)
+
+        forecast_dates.append(forecast_date.strftime("%Y-%m-%d"))
+        forecast_values.append(round(forecast_value, 2))
+        forecast_lower.append(round(forecast_value - interval_width, 2))
+        forecast_upper.append(round(forecast_value + interval_width, 2))
+
+    # Build output dictionary
+    output = {
+        "generated_at": datetime.now().isoformat(),
+        "model_type": "ElasticNet",
+        "horizon_days": horizon_days,
+        "current_price": round(current_price, 2),
+        "current_date": current_date.strftime("%Y-%m-%d"),
+        "target": {
+            "price": round(prediction, 2),
+            "date": forecast_dates[-1],
+            "probability": confidence_level,
+            "change_percent": round(((prediction - current_price) / current_price) * 100, 2)
+            "change_percent": round(((prediction - current_price) / current_price) * 100, 2)
+        },
+        "forecast": {
+            "dates": forecast_dates,
+            "values": forecast_values,
+            "confidence_lower": forecast_lower,
+            "confidence_upper": forecast_upper
+        },
+        "metadata": {
+            "mape": mape,
+            "features_used": len(feature_names),
+            "training_samples": "unknown",  # Could be added to model_dict
+            "confidence_level": confidence_level
+        }
+    }
+
+    return output
+
+
+def select_best_model(models_path: Path, horizon_upper: str) -> tuple:
+    """
+    Compare LightGBM vs ElasticNet and select the best model based on MAPE
+
+    Returns:
+        tuple: (model_dict, model_name, comparison_info)
+    """
+    lightgbm_path = models_path / horizon_upper / "lightgbm_primary.joblib"
+    elasticnet_path = models_path / horizon_upper / "elasticnet_backup.joblib"
+
+    models_available = []
+
+    # Load LightGBM if available
+    if lightgbm_path.exists():
+        try:
+            lgbm_dict = joblib.load(lightgbm_path)
+            lgbm_mape = lgbm_dict.get('mape', float('inf'))
+            models_available.append({
+                'name': 'LightGBM',
+                'dict': lgbm_dict,
+                'mape': lgbm_mape,
+                'path': lightgbm_path
+            })
+        except Exception as e:
+            print(f"⚠️  Could not load LightGBM: {e}")
+
+    # Load ElasticNet if available
+    if elasticnet_path.exists():
+        try:
+            elastic_dict = joblib.load(elasticnet_path)
+            elastic_mape = elastic_dict.get('mape', float('inf'))
+            models_available.append({
+                'name': 'ElasticNet',
+                'dict': elastic_dict,
+                'mape': elastic_mape,
+                'path': elasticnet_path
+            })
+        except Exception as e:
+            print(f"⚠️  Could not load ElasticNet: {e}")
+
+    if not models_available:
+        raise FileNotFoundError(f"No models found for {horizon_upper}")
+
+    # Sort by MAPE (lower is better)
+    models_available.sort(key=lambda x: x['mape'])
+
+    # Select best model (lowest MAPE)
+    best_model = models_available[0]
+
+    # Prepare comparison info
+    comparison_info = {
+        'models_compared': len(models_available),
+        'winner': best_model['name'],
+        'winner_mape': best_model['mape'],
+        'models': []
+    }
+
+    for model in models_available:
+        comparison_info['models'].append({
+            'name': model['name'],
+            'mape': model['mape'],
+            'selected': model['name'] == best_model['name']
+        })
+
+    print(f"\n🏆 MODEL SELECTION for {horizon_upper}:")
+    print(f"   Models compared: {len(models_available)}")
+    for model in models_available:
+        status = "✅ SELECTED" if model == best_model else "  "
+        print(f"   {status} {model['name']}: MAPE {model['mape']:.4f}%")
+
+    return best_model['dict'], best_model['name'], comparison_info
+
+
+def apply_economic_bounds(forecast_dict: dict, horizon_days: int) -> dict:
+    """
+    Apply economic bounds to forecast
+
+    Bounds based on historical P5-P95 percentiles:
+    - 7D: ±4%
+    - 15D: ±5%
+    - 30D: ±7%
+    - 90D: ±8%
+    """
+    bounds_map = {7: 0.04, 15: 0.05, 30: 0.07, 90: 0.08}
+    max_change_pct = bounds_map.get(horizon_days, 0.08)
+
+    current_price = forecast_dict['current_price']
+    raw_forecast = forecast_dict['target']['price']
+
+    # Calculate bounds
+    lower_bound = current_price * (1 - max_change_pct)
+    upper_bound = current_price * (1 + max_change_pct)
+
+    # Apply bounds
+    bounded_forecast = max(lower_bound, min(upper_bound, raw_forecast))
+
+    # Log if bound was applied
+    if bounded_forecast != raw_forecast:
+        change_pct = ((raw_forecast - current_price) / current_price) * 100
+        bounded_change_pct = ((bounded_forecast - current_price) / current_price) * 100
+        print(f"⚠️  Economic bound applied {horizon_days}D: "
+              f"${raw_forecast:.2f} ({change_pct:+.2f}%) → "
+              f"${bounded_forecast:.2f} ({bounded_change_pct:+.2f}%)")
+
+        # Update forecast
+        forecast_dict['target']['price'] = round(bounded_forecast, 2)
+        forecast_dict['target']['bounded'] = True
+        forecast_dict['target']['raw_price'] = round(raw_forecast, 2)
+    else:
+        forecast_dict['target']['bounded'] = False
+
+    return forecast_dict
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate real forecasts from trained models")
+    parser.add_argument(
+        '--horizon',
+        type=str,
+        choices=['7d', '15d', '30d', '90d'],
+        help='Forecast horizon'
+    )
+    parser.add_argument(
+        '--all',
+        action='store_true',
+        help='Generate forecasts for all horizons'
+    )
+    parser.add_argument(
+        '--data-path',
+        type=Path,
+        default=Path("data"),
+        help='Path to data directory'
+    )
+    parser.add_argument(
+        '--models-path',
+        type=Path,
+        default=Path("models/trained"),
+        help='Path to trained models directory'
+    )
+    parser.add_argument(
+        '--output-path',
+        type=Path,
+        default=Path("output/forecasts"),
+        help='Path to output directory'
+    )
+
+    args = parser.parse_args()
+
+    # Validate arguments
+    if not args.horizon and not args.all:
+        parser.error("Either --horizon or --all must be specified")
+
+    # Determine horizons to process
+    if args.all:
+        horizons = ['7d', '15d', '30d', '90d']
+    else:
+        horizons = [args.horizon]
+
+    # Create output directory
+    args.output_path.mkdir(parents=True, exist_ok=True)
+
+    # Load data ONCE (shared across all horizons)
+    print(f"\n{'=' * 80}")
+    print("LOADING DATA")
+    print(f"{'=' * 80}")
+    df = load_latest_data(args.data_path)
+    print(f"✓ Data loaded: {len(df)} rows from {df.index[0]} to {df.index[-1]}")
+
+    # Generate forecasts for each horizon
+    for horizon_str in horizons:
+        horizon_days = int(horizon_str[:-1])
+        horizon_upper = horizon_str.upper()
+
+        print(f"\n{'=' * 80}")
+        print(f"GENERATING FORECAST: {horizon_upper}")
+        print(f"{'=' * 80}")
+
+        # Select best model automatically
+        try:
+            model_dict, model_name, comparison_info = select_best_model(args.models_path, horizon_upper)
+        except FileNotFoundError as e:
+            print(f"⚠️  {e}")
+            print(f"Skipping {horizon_upper}")
+            continue
+
+        # Generate forecast with smart fallback
+        forecast_dict = None
+        forecast_successful = False
+
+        try:
+            # Try with best model first
+            forecast_dict = generate_forecast(model_dict, df, horizon_days)
+            forecast_dict['model_type'] = model_name
+            forecast_dict['model_selection'] = comparison_info
+            forecast_successful = True
+
+        except KeyError as e:
+            print(f"⚠️  {model_name} failed (incompatible features)")
+            print(f"   Trying ElasticNet fallback...")
+
+            # Fallback to ElasticNet (always has compatible features)
+            elasticnet_path = args.models_path / horizon_upper / "elasticnet_backup.joblib"
+            if elasticnet_path.exists() and model_name != "ElasticNet":
+                try:
+                    elasticnet_dict = joblib.load(elasticnet_path)
+                    forecast_dict = generate_forecast(elasticnet_dict, df, horizon_days)
+
+                    # Update metadata
+                    forecast_dict['model_type'] = "ElasticNet"
+                    comparison_info['fallback_used'] = True
+                    comparison_info['fallback_reason'] = f"{model_name} incompatible features"
+                    forecast_dict['model_selection'] = comparison_info
+                    forecast_successful = True
+                    print(f"✅ Using ElasticNet fallback")
+
+                except Exception as e2:
+                    print(f"✗ Fallback failed: {e2}")
+
+        if not forecast_successful:
+            print(f"✗ All models failed for {horizon_upper}")
+            continue
+
+        # Forecast generated successfully
+        try:
+            print(f"✓ Forecast generated:")
+            print(f"  Current: ${forecast_dict['current_price']:.2f}")
+            print(f"  Predicted: ${forecast_dict['target']['price']:.2f}")
+            change = forecast_dict['target']['price'] - forecast_dict['current_price']
+            change_pct = (change / forecast_dict['current_price']) * 100
+            print(f"  Change: ${change:+.2f} ({change_pct:+.2f}%)")
+
+            # Apply economic bounds
+            forecast_dict = apply_economic_bounds(forecast_dict, horizon_days)
+
+            # Save to file
+            output_file = args.output_path / f"forecast_{horizon_str}.json"
+            with open(output_file, 'w') as f:
+                json.dump(forecast_dict, f, indent=2)
+
+            print(f"✓ Saved to: {output_file}")
+
+        except Exception as e:
+            print(f"✗ Error generating forecast: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+    print(f"\n{'=' * 80}")
+    print("FORECASTS GENERATION COMPLETED")
+    print(f"{'=' * 80}")
+    print(f"\nGenerated {len(horizons)} forecasts in: {args.output_path}")
+    print("\nNext steps:")
+    print("1. Verify forecasts are reasonable (check JSON files)")
+    print("2. Restart API to pick up new forecasts")
+    print("3. Check dashboard shows real predictions (not mock)")
+    print()
+
+
+if __name__ == "__main__":
+    main()

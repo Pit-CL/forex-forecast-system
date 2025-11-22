@@ -1,0 +1,35 @@
+{
+  "last_updated": "2025-11-22T14:18:38.463771",
+  "sample_size": 0,
+  "horizons": {
+    "7d": {
+      "mae": 8.5,
+      "rmse": 12.3,
+      "mape": 0.92,
+      "directional_accuracy": 87.0,
+      "sample_size": 0
+    },
+    "15d": {
+      "mae": 14.2,
+      "rmse": 19.7,
+      "mape": 1.54,
+      "directional_accuracy": 82.0,
+      "sample_size": 0
+    },
+    "30d": {
+      "mae": 22.8,
+      "rmse": 28.5,
+      "mape": 2.45,
+      "directional_accuracy": 76.0,
+      "sample_size": 0
+    },
+    "90d": {
+      "mae": 35.6,
+      "rmse": 45.2,
+      "mape": 3.82,
+      "directional_accuracy": 68.0,
+      "sample_size": 0
+    }
+  },
+  "note": "Default metrics - no backtesting data available yet"
+}

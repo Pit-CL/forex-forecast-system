@@ -1,0 +1,218 @@
+"""
+Main FastAPI application for Forex Forecast System
+"""
+import time
+from datetime import datetime
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import logging
+
+from routers import forecasts_router, indicators_router, news_router, drivers_router
+from routers.market import router as market_router
+from routers.auth import router as auth_router
+from routers.calculator import router as calculator_router
+from routers.importer import router as importer_router
+from models import HistoricalResponse, HealthStatus
+from services.data_service import DataService
+from utils.config import settings
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.log_level),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Track application start time
+app_start_time = time.time()
+
+# Initialize services
+data_service = DataService()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan events for the application"""
+    # Startup
+    logger.info(f"Starting {settings.api_title} v{settings.api_version}")
+    logger.info(f"Development mode: {settings.development_mode}")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down application")
+
+
+# Create FastAPI application
+app = FastAPI(
+    title=settings.api_title,
+    description=settings.api_description,
+    version=settings.api_version,
+    lifespan=lifespan
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=settings.cors_credentials,
+    allow_methods=settings.cors_methods,
+    allow_headers=settings.cors_headers,
+)
+
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint with API information"""
+    return {
+        "name": settings.api_title,
+        "version": settings.api_version,
+        "description": settings.api_description,
+        "endpoints": {
+            "forecasts": "/api/forecasts",
+            "historical": "/api/historical",
+            "indicators": "/api/indicators",
+            "news": "/api/news",
+            "drivers": "/api/drivers",
+            "health": "/api/health",
+            "docs": "/docs",
+            "redoc": "/redoc"
+        },
+        "timestamp": datetime.now()
+    }
+
+
+# Health check endpoint
+@app.get("/api/health", response_model=HealthStatus)
+async def health_check():
+    """
+    Health check endpoint
+
+    Returns the current status of the API and its data sources
+    """
+    try:
+        # Check data sources availability
+        data_sources = {
+            "forecasts": True,  # In mock mode, always true
+            "historical_data": True,
+            "indicators": True,
+            "news": True,
+            "drivers": True
+        }
+
+        # In production, you would check actual file/database availability
+        if not settings.development_mode:
+            # Check if forecast files exist
+            forecast_files = ["forecast_7d.json", "forecast_15d.json", "forecast_30d.json", "forecast_90d.json"]
+            for file in forecast_files:
+                file_path = settings.output_path / file
+                if not file_path.exists():
+                    data_sources["forecasts"] = False
+                    break
+
+            # Check warehouse data
+            warehouse_file = settings.warehouse_path / "usdclp_daily.parquet"
+            data_sources["historical_data"] = warehouse_file.exists()
+
+        return HealthStatus(
+            status="healthy" if all(data_sources.values()) else "degraded",
+            timestamp=datetime.now(),
+            version=settings.api_version,
+            data_sources=data_sources,
+            uptime_seconds=time.time() - app_start_time
+        )
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=500, detail="Health check failed")
+
+
+# Historical data endpoint
+@app.get("/api/historical", response_model=HistoricalResponse)
+async def get_historical_data(days: int = 30):
+    """
+    Get historical USD/CLP data
+
+    Parameters:
+    - days: Number of days of historical data (default: 30, max: 365)
+    """
+    if days < 1 or days > 365:
+        raise HTTPException(
+            status_code=400,
+            detail="Days parameter must be between 1 and 365"
+        )
+
+    try:
+        historical_data = await data_service.get_historical_data(days)
+        return historical_data
+    except Exception as e:
+        logger.error(f"Error fetching historical data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Statistics endpoint
+@app.get("/api/statistics")
+async def get_statistics():
+    """
+    Get comprehensive statistics for USD/CLP
+
+    Returns various statistical metrics and analysis
+    """
+    try:
+        # Get historical data for statistics
+        historical_30d = await data_service.get_historical_data(30)
+        historical_90d = await data_service.get_historical_data(90)
+
+        # Get current indicators
+        indicators = await data_service.get_technical_indicators()
+
+        return {
+            "timestamp": datetime.now(),
+            "current_price": indicators.current_price,
+            "statistics_30d": historical_30d.statistics,
+            "statistics_90d": historical_90d.statistics,
+            "technical_signal": indicators.overall_signal,
+            "technical_strength": indicators.overall_strength
+        }
+    except Exception as e:
+        logger.error(f"Error calculating statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Include routers
+app.include_router(auth_router)  # Auth router first for priority
+app.include_router(forecasts_router)
+app.include_router(indicators_router)
+app.include_router(news_router)
+app.include_router(drivers_router)
+app.include_router(calculator_router)
+app.include_router(importer_router)  # Importer tools for Chilean importers
+app.include_router(market_router)  # Market data and performance metrics
+
+
+# Custom exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Global exception handler"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal Server Error",
+            "message": "An unexpected error occurred",
+            "timestamp": datetime.now().isoformat()
+        }
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.debug
+    )

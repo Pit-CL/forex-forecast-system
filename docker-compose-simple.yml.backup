@@ -1,0 +1,56 @@
+version: "3.8"
+
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: forex-api
+    restart: unless-stopped
+    environment:
+      - API_TITLE=Forex Forecast System API
+      - API_VERSION=1.0.0
+      - DEBUG=false
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEVELOPMENT_MODE=false
+      - DATA_PATH=/app/data
+      - OUTPUT_PATH=/app/output
+      - WAREHOUSE_PATH=/app/data/warehouse
+      - CORS_ORIGINS=["*"]
+      - CORS_CREDENTIALS=true
+      - CORS_METHODS=["*"]
+      - CORS_HEADERS=["*"]
+      - CACHE_TTL=300
+      - LOG_LEVEL=INFO
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+    volumes:
+      - ./data:/app/data:ro
+      - ./models:/app/trained_models:ro
+      - ./logs:/app/logs
+      - ./output:/app/output:ro
+    ports:
+      - "8000:8000"
+    networks:
+      - forex-network
+
+  frontend:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: "http://155.138.162.47:8000"
+    container_name: forex-frontend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - forex-network
+
+networks:
+  forex-network:
+    driver: bridge

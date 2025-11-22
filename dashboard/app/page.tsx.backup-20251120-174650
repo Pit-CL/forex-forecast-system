@@ -1,0 +1,85 @@
+'use client'
+
+import { useQuery } from '@tanstack/react-query'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ThemeToggle } from '@/components/theme-toggle'
+import { getAllForecasts, getPerformance, getLatestMarketData } from '@/lib/api'
+import { OverviewTab } from '@/components/overview-tab'
+import { AnalysisTab } from '@/components/analysis-tab'
+
+export default function DashboardPage() {
+  const { data: forecasts, isLoading: loadingForecasts } = useQuery({
+    queryKey: ['forecasts'],
+    queryFn: getAllForecasts,
+    refetchInterval: 300000, // Refresh every 5 minutes // Refetch every 5 minutes
+  })
+
+  const { data: performance, isLoading: loadingPerformance } = useQuery({
+    queryKey: ['performance'],
+    queryFn: getPerformance,
+  })
+
+  const { data: marketData, isLoading: loadingMarketData } = useQuery({
+    queryKey: ['market-data'],
+    queryFn: getLatestMarketData,
+    refetchInterval: 300000, // Refresh every 5 minutes
+  })
+
+
+  const isLoading = loadingForecasts || loadingPerformance || loadingMarketData
+
+  // Get current rate from market data (includes live USD/CLP via yfinance)
+  const forecast7D = forecasts?.find(f => f.horizon === '7D')
+  const currentRate = marketData?.usdclp || forecast7D?.current_rate || 0
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-16 items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">USD/CLP Forecast</h1>
+            {!isLoading && (
+              <div className="ml-4 flex items-center gap-2 rounded-lg bg-muted px-4 py-2">
+                <span className="text-sm text-muted-foreground">Actual:</span>
+                <span className="text-xl font-bold font-mono">
+                  ${currentRate.toFixed(2)}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-4">
+            <ThemeToggle />
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="container px-4 py-6">
+        <Tabs defaultValue="overview" className="space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="analysis">Análisis</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="space-y-6">
+            <OverviewTab
+              forecasts={forecasts || []}
+              performance={performance || []}
+              marketData={marketData}
+              isLoading={isLoading}
+            />
+          </TabsContent>
+
+          <TabsContent value="analysis" className="space-y-6">
+            <AnalysisTab
+              forecasts={forecasts || []}
+              performance={performance || []}
+              isLoading={isLoading}
+            />
+          </TabsContent>
+        </Tabs>
+      </main>
+    </div>
+  )
+}

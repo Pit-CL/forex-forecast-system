@@ -1,0 +1,47 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+.npm
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs (keep structure, ignore content)
+logs/*.log
+
+# Environment
+.env
+.env.local
+.env.production
+*.local
+
+# Secrets
+*.pem
+*.key
+nginx/ssl/
+
+# Cache
+.cache/
+*.joblib.cache
+
+# Backups (keep structure)
+backups/*.csv
+backups/*.py
+.env

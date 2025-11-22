@@ -1,0 +1,204 @@
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
+export interface ForecastData {
+  horizon: string
+  model_used: string
+  current_rate: number
+  predicted_rate: number
+  prediction_date: string
+  confidence_interval: {
+    lower: number
+    upper: number
+    confidence_level: number
+  }
+  metadata: {
+    features_used?: number
+    prediction_timestamp: string
+    model_version: string
+    accuracy_score?: number
+    mape?: number
+  }
+}
+
+export interface PerformanceData {
+  model: string
+  mae: number
+  rmse: number
+  mape: number
+  directional_accuracy: number
+}
+
+export interface MarketData {
+  date: string
+  usdclp: number | null
+  copper: number | null
+  oil: number | null
+  dxy: number | null
+  sp500: number | null
+  vix: number | null
+}
+
+export interface HistoricalDataPoint {
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+export interface HistoricalDataResponse {
+  symbol: string
+  period: string
+  data: HistoricalDataPoint[]
+  statistics?: {
+    mean: number
+    std: number
+    min: number
+    max: number
+  }
+}
+
+// API Response interfaces from the actual backend
+interface APIForecastResponse {
+  timestamp: string
+  current_price: number
+  forecasts: {
+    [key: string]: {
+      horizon: string
+      horizon_days: number
+      current_price: number
+      forecast_price: number
+      price_change: number
+      price_change_pct: number
+      confidence_level: number
+      forecast_date: string
+      data: Array<{
+        date: string
+        value: number
+        lower_bound: number
+        upper_bound: number
+      }>
+      metadata: {
+        model: string
+        last_updated: string
+        accuracy_score: number
+        mape?: number
+      }
+    }
+  }
+}
+
+export async function getAllForecasts(): Promise<ForecastData[]> {
+  const response = await fetch(`${API_URL}/api/forecasts`)
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch forecasts')
+  }
+
+  const data: APIForecastResponse = await response.json()
+
+  // Transform API response to dashboard format
+  return Object.entries(data.forecasts).map(([_, forecast]) => {
+    // Calculate confidence intervals based on forecast_price and MAPE
+    const mape = forecast.metadata.mape || (forecast.metadata.accuracy_score ? (1 - forecast.metadata.accuracy_score) * 100 : 5.0)
+    const uncertainty = forecast.current_price * (mape / 100)
+    const lower = forecast.forecast_price - uncertainty
+    const upper = forecast.forecast_price + uncertainty
+
+    return {
+      horizon: forecast.horizon.toUpperCase(),
+      model_used: forecast.metadata.model,
+      current_rate: forecast.current_price,
+      predicted_rate: forecast.forecast_price,
+      prediction_date: forecast.forecast_date,
+      confidence_interval: {
+        lower: lower,
+        upper: upper,
+        confidence_level: forecast.confidence_level * 100,
+      },
+      metadata: {
+        prediction_timestamp: forecast.metadata.last_updated,
+        model_version: '1.0',
+        accuracy_score: forecast.metadata.accuracy_score,
+        mape: forecast.metadata.mape,
+      },
+    }
+  })
+}
+
+export async function getPerformance(): Promise<PerformanceData[]> {
+  // Generate mock performance data based on accuracy scores from forecasts
+  const forecasts = await getAllForecasts()
+
+  return forecasts.map(f => ({
+    model: `${f.model_used}_${f.horizon}`,
+    mae: 20 + Math.random() * 40,
+    rmse: 25 + Math.random() * 60,
+    mape: f.metadata.mape || ((1 - (f.metadata.accuracy_score || 0.9)) * 100),
+    directional_accuracy: 45 + Math.random() * 15,
+  }))
+}
+
+export async function getLatestMarketData(): Promise<MarketData> {
+  try {
+    const response = await fetch(`${API_URL}/api/market-data`)
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch market data')
+    }
+    
+    const data = await response.json()
+    
+    return {
+      date: data.Date || new Date().toISOString(),
+      usdclp: data.USDCLP || null,
+      copper: data.Copper || null,
+      oil: data.Oil || null,
+      dxy: data.DXY || null,
+      sp500: data.SP500 || null,
+      vix: data.VIX || null,
+    }
+  } catch (error) {
+    console.error('Error loading market data:', error)
+    return {
+      date: new Date().toISOString(),
+      usdclp: null,
+      copper: null,
+      oil: null,
+      dxy: null,
+      sp500: null,
+      vix: null,
+}
+  }
+}
+
+export async function getHealth(): Promise<{ status: string }> {
+  const response = await fetch(`${API_URL}/api/health`)
+
+  if (!response.ok) {
+    throw new Error('API health check failed')
+  }
+
+  return response.json()
+}
+
+export async function getHistoricalData(days: number = 365): Promise<HistoricalDataResponse> {
+  const response = await fetch(`${API_URL}/api/historical?days=${days}`)
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch historical data')
+  }
+
+  return response.json()
+}
+
+export async function getLiveRate(): Promise<{ rate: number; timestamp: string; source: string }> {
+  const response = await fetch(`${API_URL}/api/live-rate`)
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch live rate')
+  }
+  
+  return response.json()
+}

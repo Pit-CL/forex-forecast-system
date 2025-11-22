@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+import pandas as pd
+import numpy as np
+import sys
+import json
+import joblib
+from datetime import datetime, timedelta
+from pathlib import Path
+
+DATA_FILE = "/opt/forex-forecast-system/data/raw/yahoo_finance_data.csv"
+MODELS_DIR = "/opt/forex-forecast-system/models/trained"
+OUTPUT_DIR = "/opt/forex-forecast-system/output/forecasts"
+HORIZONS = {"7d": 7, "15d": 15, "30d": 30, "90d": 90}
+
+def create_features_enhanced(data, target_col="USDCLP"):
+    df_feat = data.copy()
+    
+    # LAG FEATURES
+    for lag in [1, 2, 3, 5, 7, 10, 14]:
+        df_feat[f"{target_col}_lag_{lag}"] = df_feat[target_col].shift(lag)
+        if "Copper" in df_feat.columns:
+            df_feat[f"Copper_lag_{lag}"] = df_feat["Copper"].shift(lag)
+        if "DXY" in df_feat.columns:
+            df_feat[f"DXY_lag_{lag}"] = df_feat["DXY"].shift(lag)
+    
+    # ROLLING STATISTICS
+    for window in [5, 10, 20, 30]:
+        df_feat[f"{target_col}_ma_{window}"] = df_feat[target_col].rolling(window).mean()
+        df_feat[f"{target_col}_std_{window}"] = df_feat[target_col].rolling(window).std()
+        if "Copper" in df_feat.columns:
+            df_feat[f"Copper_ma_{window}"] = df_feat["Copper"].rolling(window).mean()
+    
+    # CROSS-MARKET FEATURES
+    if "Copper" in df_feat.columns:
+        df_feat["USDCLP_Copper_ratio"] = df_feat[target_col] / df_feat["Copper"]
+    if "DXY" in df_feat.columns:
+        df_feat["USDCLP_DXY_ratio"] = df_feat[target_col] / df_feat["DXY"]
+    if "Copper" in df_feat.columns and "Oil" in df_feat.columns:
+        df_feat["Copper_Oil_ratio"] = df_feat["Copper"] / df_feat["Oil"]
+    
+    # RETURN FEATURES
+    if "DXY" in df_feat.columns:
+        df_feat["DXY_return_14"] = df_feat["DXY"].pct_change(periods=14)
+    
+    # MOMENTUM INDICATORS
+    df_feat[f"{target_col}_roc_5"] = df_feat[target_col].pct_change(periods=5)
+    df_feat[f"{target_col}_roc_10"] = df_feat[target_col].pct_change(periods=10)
+    
+    return df_feat
+
+def get_latest_complete_row(df):
+    """
+    Get the latest row with all required features complete (no nulls)
+    
+    This prevents issues when recent data has missing values for indicators
+    like Copper, DXY, Oil, SP500, VIX which could cause NaN in features.
+    """
+    required_cols = ["USDCLP", "Copper", "Oil", "DXY", "SP500", "VIX"]
+    
+    # Find rows with all required columns complete
+    complete_rows = df.dropna(subset=required_cols)
+    
+    if len(complete_rows) == 0:
+        raise ValueError("No complete rows found in data")
+    
+    return complete_rows.iloc[-1]
+
+def load_latest_data():
+    print("Loading data from:", DATA_FILE)
+    df = pd.read_csv(DATA_FILE, parse_dates=["Date"])
+    df = df.sort_values("Date")
+    
+    # Remove rows with null USDCLP (critical column)
+    df = df[df["USDCLP"].notna()]
+    
+    print(f"Loaded {len(df)} records")
+    
+    # Get latest COMPLETE row (all indicators present)
+    latest_complete = get_latest_complete_row(df)
+    latest_date = latest_complete["Date"]
+    latest_price = latest_complete["USDCLP"]
+    
+    # Check if we had to skip rows due to missing data
+    latest_row_idx = df[df["Date"] == latest_date].index[0]
+    total_rows = len(df)
+    skipped = total_rows - 1 - latest_row_idx
+    
+    if skipped > 0:
+        print(f"⚠️  Skipped {skipped} recent row(s) with missing data")
+    
+    print(f"Latest COMPLETE: {latest_date} - ${latest_price:.2f}")
+    
+    return df
+
+def load_model(horizon):
+    horizon_upper = horizon.upper()
+    model_path = Path(MODELS_DIR) / horizon_upper / "elasticnet_backup.joblib"
+    if not model_path.exists():
+        print(f"Model not found: {model_path}")
+        return None
+    print(f"Loading ElasticNet: {model_path}")
+    return joblib.load(model_path)
+
+def prepare_features(df, model_features):
+    # Create all features
+    df_feat = create_features_enhanced(df)
+    
+    # Get latest row with all features
+    latest_feat = df_feat.iloc[-1]
+    
+    # Extract only the features the model expects, in the right order
+    X = []
+    for feat_name in model_features:
+        if feat_name in latest_feat:
+            X.append(latest_feat[feat_name])
+        else:
+            # If feature is missing, use 0 (should not happen)
+            print(f"  WARNING: Feature {feat_name} not found, using 0")
+            X.append(0)
+    
+    return np.array([X])
+
+def generate_forecast(model_dict, df, current_price, horizon_days):
+    model = model_dict["model"]
+    scaler = model_dict.get("scaler")
+    feature_names = model_dict.get("features", [])
+    
+    print(f"  Model expects {len(feature_names)} features")
+    
+    # Prepare feature vector
+    X = prepare_features(df, feature_names)
+    print(f"  Prepared features: shape {X.shape}")
+    
+    # Scale if scaler available
+    if scaler:
+        X = scaler.transform(X)
+    
+    # Predict
+    prediction = model.predict(X)[0]
+    print(f"  Raw prediction: ${prediction:.2f}")
+    
+    # Generate daily forecast path (linear interpolation)
+    daily_forecasts = []
+    dates = []
+    for i in range(1, horizon_days + 1):
+        interpolated = current_price + (prediction - current_price) * (i / horizon_days)
+        noise = np.random.normal(0, current_price * 0.005)
+        daily_forecasts.append(interpolated + noise)
+        dates.append((datetime.now() + timedelta(days=i)).strftime("%Y-%m-%d"))
+    
+    # Calculate confidence intervals
+    mape = model_dict.get("mape", 5.0)
+    uncertainty = current_price * (mape / 100)
+    confidence_lower = [v - uncertainty * (1 + i*0.1) for i, v in enumerate(daily_forecasts)]
+    confidence_upper = [v + uncertainty * (1 + i*0.1) for i, v in enumerate(daily_forecasts)]
+    
+    return {
+        "prediction": prediction,
+        "dates": dates,
+        "values": daily_forecasts,
+        "confidence_lower": confidence_lower,
+        "confidence_upper": confidence_upper,
+        "mape": mape
+    }
+
+def save_forecast(horizon, forecast_data, current_price, metadata):
+    output_file = Path(OUTPUT_DIR) / f"forecast_{horizon}.json"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Calculate confidence intervals for target prediction
+    mape = forecast_data["mape"]
+    uncertainty = current_price * (mape / 100)
+    target_lower = forecast_data["prediction"] - uncertainty
+    target_upper = forecast_data["prediction"] + uncertainty
+    
+    data = {
+        "generated_at": datetime.now().isoformat(),
+        "current_price": current_price,
+        "target": {
+            "price": forecast_data["prediction"],
+            "probability": 0.95,
+            "confidence_lower": target_lower,
+            "confidence_upper": target_upper
+        },
+        "forecast": {
+            "dates": forecast_data["dates"],
+            "values": forecast_data["values"],
+            "confidence_lower": forecast_data["confidence_lower"],
+            "confidence_upper": forecast_data["confidence_upper"]
+        },
+        "metadata": {
+            "model": "ElasticNet",
+            "horizon": horizon,
+            "mape": forecast_data["mape"],
+            **metadata
+        }
+    }
+    
+    with open(output_file, "w") as f:
+        json.dump(data, f, indent=2)
+    
+    pred = forecast_data["prediction"]
+    change_pct = ((pred - current_price) / current_price) * 100
+    print(f"Saved {horizon}: ${pred:.2f} ({change_pct:+.2f}%)")
+
+def main():
+    print("="*60)
+    print("ACTION 2: Generate Real Forecasts from ElasticNet Models")
+    print("="*60)
+    
+    try:
+        df = load_latest_data()
+        current_price = df["USDCLP"].iloc[-1]
+        print(f"\nCurrent USDCLP: ${current_price:.2f}")
+        print("="*60)
+        
+        for horizon, horizon_days in HORIZONS.items():
+            print(f"\nGenerating {horizon} ({horizon_days} days)...")
+            model_dict = load_model(horizon)
+            if not model_dict:
+                print(f"Skipping {horizon} - model not found")
+                continue
+            
+            forecast_data = generate_forecast(model_dict, df, current_price, horizon_days)
+            save_forecast(horizon, forecast_data, current_price, {"horizon_days": horizon_days})
+        
+        print("\n" + "="*60)
+        print("ACTION 2 COMPLETED SUCCESSFULLY")
+        print("="*60)
+        print(f"Output: {OUTPUT_DIR}")
+        print(f"Forecasts: {list(HORIZONS.keys())}")
+        print("="*60)
+        return 0
+        
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+if __name__ == "__main__":
+    sys.exit(main())
