@@ -82,7 +82,10 @@ def get_live_indicators():
     
     # Add rate differential from FRED data (NEW 2025-11-22)
     try:
+        # Try Docker path first, then local path
         fred_path = Path("/app/data/raw/fred_interest_rates.csv")
+        if not fred_path.exists():
+            fred_path = Path(__file__).parent.parent.parent / "data" / "raw" / "fred_interest_rates.csv"
         if fred_path.exists():
             fred_df = pd.read_csv(fred_path)
             if "rate_differential" in fred_df.columns and len(fred_df) > 0:
