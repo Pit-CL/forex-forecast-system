@@ -55,9 +55,9 @@ class Settings(BaseSettings):
         # Override paths if in development mode
         if self.development_mode:
             base_path = Path("/Users/rafaelfarias/Documents/Recursos/Proyectos/forex-forecast-system")
-            self.data_path = base_path / "api" / "mock_data"
-            self.output_path = base_path / "api" / "mock_data" / "output"
-            self.warehouse_path = base_path / "api" / "mock_data" / "warehouse"
+            self.data_path = base_path / "data"
+            self.output_path = base_path / "output"
+            self.warehouse_path = base_path / "data" / "warehouse"
 
 
 # Create global settings instance

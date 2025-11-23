@@ -30,13 +30,37 @@ class DataService:
     def _load_csv_data(self) -> pd.DataFrame:
         """Load real data from CSV file"""
         try:
-            # Use configured data path
+            # First try mindicador_data.csv for more recent data
+            mindicador_path = self.data_path / "raw" / "mindicador_data.csv"
+            if mindicador_path.exists():
+                df_mindicador = pd.read_csv(mindicador_path, parse_dates=['date'])
+                df_mindicador = df_mindicador.rename(columns={'dolar': 'USDCLP'})
+                df_mindicador = df_mindicador.set_index('date')
+                df_mindicador = df_mindicador[['USDCLP']].dropna()
+                # Remove timezone info to match yahoo data format
+                df_mindicador.index = df_mindicador.index.tz_localize(None)
+
+                # Also load yahoo_finance_data for older historical data
+                yahoo_path = self.data_path / "raw" / "yahoo_finance_data.csv"
+                if yahoo_path.exists():
+                    df_yahoo = pd.read_csv(yahoo_path, index_col=0, parse_dates=True)
+                    df_yahoo = df_yahoo[['USDCLP']]
+
+                    # Combine both datasets (mindicador has priority for overlapping dates)
+                    df = pd.concat([df_yahoo, df_mindicador])
+                    df = df[~df.index.duplicated(keep='last')]  # Keep mindicador data for duplicates
+                    df = df.sort_index()
+                    return df
+                else:
+                    return df_mindicador.sort_index()
+
+            # Fallback to yahoo_finance_data.csv
             csv_path = self.data_path / "raw" / "yahoo_finance_data.csv"
-            
+
             if not csv_path.exists():
                 print(f"CSV file not found at {csv_path}")
                 return pd.DataFrame()
-            
+
             df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
             df = df.sort_index()
             return df

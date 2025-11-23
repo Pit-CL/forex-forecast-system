@@ -1,28 +1,55 @@
 'use client'
 
-import { ForecastData } from '@/lib/api'
+import { ForecastData, getHistoricalData } from '@/lib/api'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, ComposedChart } from 'recharts'
 import { formatCurrency } from '@/lib/utils'
+import { useEffect, useState } from 'react'
 
 interface ForecastChartProps {
   forecast: ForecastData
 }
 
 export function ForecastChart({ forecast }: ForecastChartProps) {
-  // Create sample historical data (in production, this would come from the API)
-  const today = new Date()
-  const data = []
+  const [historicalData, setHistoricalData] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
 
-  // Historical data (last 30 days)
-  for (let i = 30; i >= 1; i--) {
-    const date = new Date(today)
-    date.setDate(date.getDate() - i)
-    data.push({
-      date: date.toLocaleDateString('es-CL', { month: 'short', day: 'numeric' }),
-      actual: forecast.current_rate + (Math.random() - 0.5) * 30,
-      type: 'historical',
-    })
-  }
+  useEffect(() => {
+    // Fetch real historical data
+    const fetchHistoricalData = async () => {
+      try {
+        const response = await getHistoricalData(30)
+        const formattedData = response.data.map((point) => ({
+          date: new Date(point.date).toLocaleDateString('es-CL', { month: 'short', day: 'numeric' }),
+          actual: point.close,
+          type: 'historical',
+        }))
+        setHistoricalData(formattedData)
+      } catch (error) {
+        console.error('Error fetching historical data:', error)
+        // Fallback to mock data if API fails
+        const today = new Date()
+        const fallbackData = []
+        for (let i = 30; i >= 1; i--) {
+          const date = new Date(today)
+          date.setDate(date.getDate() - i)
+          fallbackData.push({
+            date: date.toLocaleDateString('es-CL', { month: 'short', day: 'numeric' }),
+            actual: forecast.current_rate + (Math.random() - 0.5) * 30,
+            type: 'historical',
+          })
+        }
+        setHistoricalData(fallbackData)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchHistoricalData()
+  }, [forecast.current_rate])
+
+  // Build complete data array
+  const today = new Date()
+  const data = [...historicalData]
 
   // Current rate
   data.push({
@@ -53,6 +80,14 @@ export function ForecastChart({ forecast }: ForecastChartProps) {
   const padding = (maxValue - minValue) * 0.1 // 10% padding
   const yMin = Math.floor(minValue - padding)
   const yMax = Math.ceil(maxValue + padding)
+
+  if (loading) {
+    return (
+      <div className="h-[300px] w-full flex items-center justify-center">
+        <div className="text-muted-foreground">Cargando datos históricos...</div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-[300px] w-full">

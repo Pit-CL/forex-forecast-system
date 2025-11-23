@@ -1,8 +1,9 @@
 'use client'
 
-import { ForecastData } from '@/lib/api'
+import { ForecastData, getHistoricalData } from '@/lib/api'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, ComposedChart } from 'recharts'
 import { formatCurrency } from '@/lib/utils'
+import { useEffect, useState } from 'react'
 
 interface DetailedForecastChartProps {
   forecast: ForecastData
@@ -11,6 +12,9 @@ interface DetailedForecastChartProps {
 }
 
 export function DetailedForecastChart({ forecast, allForecasts, timeRange }: DetailedForecastChartProps) {
+  const [historicalData, setHistoricalData] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
   const daysMap = {
     '1M': 30,
     '3M': 90,
@@ -20,18 +24,42 @@ export function DetailedForecastChart({ forecast, allForecasts, timeRange }: Det
 
   const historicalDays = daysMap[timeRange]
   const today = new Date()
-  const data = []
 
-  // Generate historical data
-  for (let i = historicalDays; i >= 1; i--) {
-    const date = new Date(today)
-    date.setDate(date.getDate() - i)
-    data.push({
-      date: date.toLocaleDateString('es-CL', { month: 'short', day: 'numeric' }),
-      actual: forecast.current_rate + (Math.random() - 0.5) * 40 * (i / historicalDays),
-      type: 'historical',
-    })
-  }
+  useEffect(() => {
+    // Fetch real historical data
+    const fetchHistoricalData = async () => {
+      try {
+        const response = await getHistoricalData(historicalDays)
+        const formattedData = response.data.map((point) => ({
+          date: new Date(point.date).toLocaleDateString('es-CL', { month: 'short', day: 'numeric' }),
+          actual: point.close,
+          type: 'historical',
+        }))
+        setHistoricalData(formattedData)
+      } catch (error) {
+        console.error('Error fetching historical data:', error)
+        // Fallback to mock data if API fails
+        const fallbackData = []
+        for (let i = historicalDays; i >= 1; i--) {
+          const date = new Date(today)
+          date.setDate(date.getDate() - i)
+          fallbackData.push({
+            date: date.toLocaleDateString('es-CL', { month: 'short', day: 'numeric' }),
+            actual: forecast.current_rate + (Math.random() - 0.5) * 40 * (i / historicalDays),
+            type: 'historical',
+          })
+        }
+        setHistoricalData(fallbackData)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchHistoricalData()
+  }, [historicalDays, forecast.current_rate])
+
+  // Build complete data array
+  const data = [...historicalData]
 
   // Current point
   data.push({
@@ -108,6 +136,14 @@ export function DetailedForecastChart({ forecast, allForecasts, timeRange }: Det
   const padding = (maxValue - minValue) * 0.15 // 15% padding for better visibility
   const yMin = Math.floor(minValue - padding)
   const yMax = Math.ceil(maxValue + padding)
+
+  if (loading) {
+    return (
+      <div className="h-[400px] w-full flex items-center justify-center">
+        <div className="text-muted-foreground">Cargando datos históricos...</div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-[400px] w-full">
